@@ -32,12 +32,19 @@ export function FoodScan({ onClose, onResult }: { onClose: () => void; onResult:
   const [phase, setPhase] = useState<Phase>({ at: 'capture' })
   const [health, setHealth] = useState<VisionHealth | null | 'loading'>('loading')
   const [dragging, setDragging] = useState(false)
+  const [samples, setSamples] = useState<Array<{ file: string; label: string }>>([])
   const camRef = useRef<HTMLInputElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const abort = useRef<AbortController | null>(null)
 
   useEffect(() => {
     visionHealth().then(setHealth)
+    // Optional demo photos in public/samples (filled by `node fix-ai.mjs`).
+    // They go through the same real AI scan as any uploaded photo.
+    fetch('/samples/manifest.json')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list: unknown) => setSamples(Array.isArray(list) ? list.slice(0, 4) : []))
+      .catch(() => setSamples([]))
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', onKey)
     return () => {
@@ -64,6 +71,17 @@ export function FoodScan({ onClose, onResult }: { onClose: () => void; onResult:
     try {
       const { dataUrl, thumb } = await preparePhoto(file)
       await analyse(dataUrl, dataUrl, thumb)
+    } catch (e) {
+      setPhase({ at: 'capture', problem: (e as Error).message })
+    }
+  }
+
+  async function useSample(file: string) {
+    try {
+      const res = await fetch(`/samples/${file}`)
+      if (!res.ok) throw new Error('Sample photo is missing.')
+      const blob = await res.blob()
+      await take(new File([blob], file, { type: blob.type || 'image/jpeg' }))
     } catch (e) {
       setPhase({ at: 'capture', problem: (e as Error).message })
     }
@@ -124,6 +142,18 @@ export function FoodScan({ onClose, onResult }: { onClose: () => void; onResult:
                 <input ref={camRef} type="file" accept="image/*" capture="environment" hidden onChange={(e) => take(e.target.files?.[0])} />
                 <input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={(e) => take(e.target.files?.[0])} />
               </div>
+              {samples.length > 0 && (
+                <div className="scan-samples">
+                  <span>{t('No food in front of you? Scan a sample photo:')}</span>
+                  <div>
+                    {samples.map((s) => (
+                      <button type="button" key={s.file} className="scan-sample" onClick={() => useSample(s.file)} title={s.label}>
+                        <img src={`/samples/${s.file}`} alt={s.label} loading="lazy" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               {phase.problem && <p className="scan-problem" role="alert">{phase.problem}</p>}
               <p className="scan-status">
                 {health === 'loading' ? (

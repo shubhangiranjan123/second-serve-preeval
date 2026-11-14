@@ -24,6 +24,8 @@ copy .env.example .env        # macOS/Linux: cp .env.example .env
 npm run dev
 ```
 
+**Easiest setup:** run `node fix-ai.mjs` once. It asks for your key if needed, picks a Gemini model your key can actually use (testing it with a real photo), sets up 2–4 sample photos in `public/samples`, and writes `.env`. Then `npm run dev`.
+
 `npm run dev` starts **two** things: the AI backend on port 8787 (holds the API key) and the app on **http://localhost:5173**. Vite forwards `/api` to the backend, so the key never reaches the browser.
 
 Without a key everything still works except the photo scan: the scanner says it isn't configured, and a donor can continue without AI (the listing then needs a coordinator's approval before matching).

@@ -3,7 +3,9 @@ import { spawn } from 'node:child_process'
 
 const procs = [
   spawn(process.execPath, ['server/index.mjs'], { stdio: 'inherit' }),
-  spawn(process.platform === 'win32' ? 'npx.cmd' : 'npx', ['vite'], { stdio: 'inherit', shell: process.platform === 'win32' }),
+  // One command string + shell: works with npx on Windows without the
+  // "args with shell" deprecation warning.
+  spawn('npx vite', { stdio: 'inherit', shell: true }),
 ]
 const stop = () => procs.forEach((p) => p.kill())
 process.on('SIGINT', stop)

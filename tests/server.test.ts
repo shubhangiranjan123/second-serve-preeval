@@ -71,6 +71,35 @@ describe('AI backend', () => {
     expect(JSON.stringify(body)).not.toContain('secret-key')
   })
 
+  test('Gemini 400 on the schema → retries once without it', async () => {
+    const bodies: Array<Record<string, any>> = []
+    const call = await boot({ GEMINI_API_KEY: 'k' }, async (_u: string, init: { body: string }) => {
+      bodies.push(JSON.parse(init.body))
+      return bodies.length === 1 ? new Response('{"error":{"message":"Invalid JSON schema"}}', { status: 400 }) : geminiOk(MODEL_REPLY)()
+    })
+    const res = await call('/api/food-scan', { image: dataUrl(JPEG) })
+    expect(res.status).toBe(200)
+    expect(bodies[0].generationConfig.responseJsonSchema).toBeDefined()
+    expect(bodies[1].generationConfig.responseJsonSchema).toBeUndefined()
+  })
+
+  test('"none" / 0 quantities from the model become nulls', () => {
+    const s = normalizeScan({ ...MODEL_REPLY, quantity: { inferable: false, servings: 0, amount: 0, unit: 'none', basis: '' } })
+    expect(s.quantity).toMatchObject({ inferable: false, servings: null, amount: null, unit: null })
+  })
+
+  test('AQ.… AI Studio keys use the Gemini API; invalid key → PROVIDER_AUTH without a retry', async () => {
+    const urls: string[] = []
+    const call = await boot({ GEMINI_API_KEY: 'AQ.test' }, async (u: string) => {
+      urls.push(u)
+      return new Response('{"error":{"code":400,"message":"API key not valid.","details":[{"reason":"API_KEY_INVALID"}]}}', { status: 400 })
+    })
+    const body = await (await call('/api/food-scan', { image: dataUrl(JPEG) })).json()
+    expect(urls).toHaveLength(1)
+    expect(urls[0]).toMatch(/^https:\/\/generativelanguage\.googleapis\.com\/v1beta\/models\//)
+    expect(body.error.code).toBe('PROVIDER_AUTH')
+  })
+
   test('anthropic provider via forced tool call', async () => {
     const call = await boot({ ANTHROPIC_API_KEY: 'k' }, async () =>
       new Response(JSON.stringify({ content: [{ type: 'tool_use', name: 'report_food_scan', input: MODEL_REPLY }] }), { status: 200 }),

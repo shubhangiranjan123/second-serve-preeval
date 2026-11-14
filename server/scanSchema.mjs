@@ -33,7 +33,7 @@ Return JSON with:
 - visualAssessment: "acceptable" (no visible problems), "concerns" (something visible needs attention), or "uncertain" (photo too dark, blurry, partial or ambiguous to judge).
 - concerns: each visible issue, with kind (spoilage, mould, discoloration, contamination, pests, foreign_object, packaging, other), a one-line detail, and severity (high = should not be eaten, medium = needs a human to check, low = cosmetic).
 - packaging: "sealed", "covered", "open" (food exposed) or "unclear".
-- quantity: set inferable=true only if you can reasonably count or estimate it; give servings and/or amount+unit (servings, boxes, items, kg) and a short basis for the estimate. Otherwise inferable=false and nulls.
+- quantity: set inferable=true only if you can reasonably count or estimate it; give servings and/or amount+unit (servings, boxes, items, kg) and a short basis for the estimate. Otherwise inferable=false, servings=0, amount=0, unit="none".
 - confidence: numbers from 0 to 1 for overall, identification (what the food is) and condition (visible state).
 - reviewNotes: anything a human inspector should double-check.
 - description: one or two plain sentences for the listing, describing only what is visible (no safety claims).`
@@ -65,12 +65,14 @@ export const SCAN_JSON_SCHEMA = {
       type: 'object',
       properties: {
         inferable: { type: 'boolean' },
-        servings: { type: ['number', 'null'] },
-        amount: { type: ['number', 'null'] },
-        unit: { type: ['string', 'null'], enum: [...UNITS, null] },
+        // Plain types only (no "number | null"): some Gemini versions reject
+        // nullable unions. 0 / "none" mean "not given"; normalizeScan() maps them to null.
+        servings: { type: 'number' },
+        amount: { type: 'number' },
+        unit: { type: 'string', enum: [...UNITS, 'none'] },
         basis: { type: 'string' },
       },
-      required: ['inferable'],
+      required: ['inferable', 'servings', 'amount', 'unit', 'basis'],
     },
     confidence: {
       type: 'object',

@@ -3,3 +3,6 @@ dist
 *.local
 .DS_Store
 .env
+
+public/samples/*
+!public/samples/README.txt

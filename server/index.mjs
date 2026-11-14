@@ -16,10 +16,13 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 /** Minimal .env reader: KEY=value lines, # comments, optional quotes. Real env wins. */
 function loadEnv(file) {
   if (!existsSync(file)) return
-  for (const line of readFileSync(file, 'utf8').split(/\r?\n/)) {
+  const buf = readFileSync(file)
+  // Notepad may save as UTF-16 ("Unicode") or with a BOM: handle both.
+  const text = buf[0] === 0xff && buf[1] === 0xfe ? buf.toString('utf16le') : buf.toString('utf8')
+  for (const line of text.replace(/^\uFEFF/, '').split(/\r?\n/)) {
     const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/)
     if (!m || line.trim().startsWith('#')) continue
-    const val = m[2].replace(/^(['"])(.*)\1$/, '$2')
+    const val = m[2].trim().replace(/^(['"])(.*)\1$/, '$2')
     if (process.env[m[1]] === undefined) process.env[m[1]] = val
   }
 }
@@ -29,10 +32,11 @@ const cfg = {
   VISION_PROVIDER: process.env.VISION_PROVIDER,
   GEMINI_API_KEY: process.env.GEMINI_API_KEY,
   GEMINI_MODEL: process.env.GEMINI_MODEL,
+  GEMINI_VERTEX: process.env.GEMINI_VERTEX, // '1' only for a Vertex AI express key; AI Studio keys (AIza… or AQ.…) need nothing
   GEMINI_BASE_URL: process.env.GEMINI_BASE_URL, // optional: corporate proxy / test harness
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
   ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL,
-  timeoutMs: Number(process.env.VISION_TIMEOUT_MS) || 25_000,
+  timeoutMs: Number(process.env.VISION_TIMEOUT_MS) || 45_000,
 }
 
 const api = createApiHandler(cfg)

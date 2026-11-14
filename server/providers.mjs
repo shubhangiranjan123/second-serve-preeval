@@ -9,27 +9,44 @@ import { SCAN_JSON_SCHEMA, SCAN_PROMPT, ScanError, extractJson } from './scanSch
 
 async function postJson(url, headers, body, timeoutMs, fetchImpl) {
   const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  let timer
+  // The limit covers the WHOLE exchange (headers + body). Some models send
+  // headers at once and then think for a long time before the body arrives.
+  const deadline = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      ctrl.abort()
+      reject(new ScanError('TIMEOUT', `Vision model did not answer within ${Math.round(timeoutMs / 1000)} s`, 504))
+    }, timeoutMs)
+  })
   let res
+  let text
   try {
-    res = await fetchImpl(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...headers },
-      body: JSON.stringify(body),
-      signal: ctrl.signal,
-    })
+    const exchange = (async () => {
+      const r = await fetchImpl(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', ...headers },
+        body: JSON.stringify(body),
+        signal: ctrl.signal,
+      })
+      return { r, t: await r.text() }
+    })()
+    exchange.catch(() => {}) // the deadline may win; avoid an unhandled rejection
+    ;({ r: res, t: text } = await Promise.race([exchange, deadline]))
   } catch (err) {
+    if (err instanceof ScanError) throw err
     if (err && err.name === 'AbortError') throw new ScanError('TIMEOUT', `Vision model did not answer within ${Math.round(timeoutMs / 1000)} s`, 504)
     throw new ScanError('PROVIDER_UNREACHABLE', 'Could not reach the vision model provider', 502)
   } finally {
     clearTimeout(timer)
   }
-  const text = await res.text()
   if (!res.ok) {
-    const code = res.status === 401 || res.status === 403 ? 'PROVIDER_AUTH' : res.status === 429 ? 'PROVIDER_RATE_LIMIT' : 'PROVIDER_ERROR'
+    const badKey = /API_KEY_INVALID|API key not valid|UNAUTHENTICATED|PERMISSION_DENIED/i.test(text)
+    const code = res.status === 401 || res.status === 403 || badKey ? 'PROVIDER_AUTH' : res.status === 429 ? 'PROVIDER_RATE_LIMIT' : 'PROVIDER_ERROR'
     // Log the provider's detail server-side only; never echo keys or raw bodies to the browser.
     console.warn(`[food-scan] provider HTTP ${res.status}: ${text.slice(0, 300)}`)
-    throw new ScanError(code, `Vision provider returned HTTP ${res.status}`, res.status === 429 ? 429 : 502)
+    const err = new ScanError(code, `Vision provider returned HTTP ${res.status}`, res.status === 429 ? 429 : 502)
+    err.httpStatus = res.status
+    throw err
   }
   try {
     return JSON.parse(text)
@@ -42,22 +59,40 @@ async function postJson(url, headers, body, timeoutMs, fetchImpl) {
 // Google AI Studio key (free tier available). Structured output via responseJsonSchema.
 export async function geminiScan({ base64, mimeType }, cfg, fetchImpl = fetch) {
   const model = cfg.GEMINI_MODEL || 'gemini-2.5-flash'
-  const base = (cfg.GEMINI_BASE_URL || 'https://generativelanguage.googleapis.com').replace(/\/$/, '')
-  const url = `${base}/v1beta/models/${encodeURIComponent(model)}:generateContent`
-  const data = await postJson(
-    url,
-    { 'x-goog-api-key': cfg.GEMINI_API_KEY },
-    {
-      contents: [{ role: 'user', parts: [{ inline_data: { mime_type: mimeType, data: base64 } }, { text: SCAN_PROMPT }] }],
-      generationConfig: {
-        temperature: 0.1,
-        responseMimeType: 'application/json',
-        responseJsonSchema: SCAN_JSON_SCHEMA,
-      },
+  // AI Studio keys (both the old AIza… and the new AQ.Ab… format) use the
+  // Gemini API. Set GEMINI_VERTEX=1 only for a Vertex AI express-mode key.
+  const vertex = cfg.GEMINI_VERTEX === '1'
+  const base = (cfg.GEMINI_BASE_URL || (vertex ? 'https://aiplatform.googleapis.com' : 'https://generativelanguage.googleapis.com')).replace(/\/$/, '')
+  const url = vertex
+    ? `${base}/v1/publishers/google/models/${encodeURIComponent(model)}:generateContent`
+    : `${base}/v1beta/models/${encodeURIComponent(model)}:generateContent`
+  // 2.5 Flash models "think" before answering by default, which can take
+  // 20 s+ on a photo. Describing a photo doesn't need it, so turn it off.
+  // Gemini 3 models take a thinking level instead; "low" keeps photo scans quick.
+  const fastThinking = /2\.5-flash/.test(model)
+    ? { thinkingConfig: { thinkingBudget: 0 } }
+    : /gemini-3/.test(model)
+      ? { thinkingConfig: { thinkingLevel: 'low' } }
+      : {}
+  const request = (withSchema) => ({
+    contents: [{ role: 'user', parts: [{ inline_data: { mime_type: mimeType, data: base64 } }, { text: SCAN_PROMPT }] }],
+    generationConfig: {
+      temperature: 0.1,
+      responseMimeType: 'application/json',
+      ...(withSchema ? { responseJsonSchema: SCAN_JSON_SCHEMA, ...fastThinking } : {}),
     },
-    cfg.timeoutMs,
-    fetchImpl,
-  )
+  })
+  let data
+  try {
+    data = await postJson(url, { 'x-goog-api-key': cfg.GEMINI_API_KEY }, request(true), cfg.timeoutMs, fetchImpl)
+  } catch (err) {
+    // HTTP 400 usually means this model/API version rejected the schema.
+    // Retry once in plain JSON mode; the prompt still lists every field and
+    // normalizeScan() still validates the reply, so nothing is guessed.
+    if (!(err instanceof ScanError) || err.httpStatus !== 400 || err.code === 'PROVIDER_AUTH') throw err
+    console.warn('[food-scan] Gemini rejected the schema; retrying in plain JSON mode')
+    data = await postJson(url, { 'x-goog-api-key': cfg.GEMINI_API_KEY }, request(false), cfg.timeoutMs, fetchImpl)
+  }
   const cand = data?.candidates?.[0]
   if (!cand) {
     const blocked = data?.promptFeedback?.blockReason

@@ -58,7 +58,7 @@ export const UPLOAD = {
   types: ['image/jpeg', 'image/png', 'image/webp'],
   maxSide: 1024, // long edge sent to the model
   thumbSide: 160, // square thumbnail kept with the listing
-  clientTimeoutMs: 35_000,
+  clientTimeoutMs: 100_000, // server gives up first (45 s per attempt); this is only a safety net
 }
 
 /** Validate before doing any work. Returns an error message or null. */
