@@ -14,8 +14,8 @@ import { Dispatch } from './views/Dispatch'
 import { Impact } from './views/Impact'
 import { Live } from './views/Live'
 import { MapView } from './views/MapView'
-import { Confetti, burstConfetti } from './components/Confetti'
-import { CursorGlow } from './components/CursorGlow'
+import { Cursor } from './components/Cursor'
+import { WasteBar } from './components/WasteCounter'
 import { chime } from './lib/sound'
 import { SPECIES, milestoneReached, MILESTONES } from './lib/garden'
 import { useT } from './lib/i18n'
@@ -63,14 +63,12 @@ export default function App() {
       const reached = milestoneReached(historyCount.current, state.history.length)
       setCelebrate(latest ?? null)
       chime('bloom')
-      burstConfetti(0.6)
       const timers = [setTimeout(() => setCelebrate(null), 2600)]
       if (reached) {
         timers.push(
           setTimeout(() => {
             setMilestone(reached)
             chime('milestone')
-            burstConfetti(1.6)
           }, 2700),
           setTimeout(() => setMilestone(null), 7200),
         )
@@ -140,8 +138,7 @@ export default function App() {
 
   const overlays = (
     <>
-      <Confetti />
-      <CursorGlow />
+      <Cursor />
     </>
   )
 
@@ -160,7 +157,10 @@ export default function App() {
   return (
     <div className="shell">
       <Grain />
-      <TopNav view={view} onNavigate={navigate} counts={counts} onAdd={() => setFormOpen(true)} />
+      <div className="topstack">
+        <WasteBar />
+        <TopNav view={view} onNavigate={navigate} counts={counts} onAdd={() => setFormOpen(true)} />
+      </div>
 
       <main className={cx('content', view === 'home' && 'content-home')} key={view}>
         {view === 'home' && <Home state={state} now={now} onAdd={() => setFormOpen(true)} onOpen={openFile} onNavigate={navigate} />}

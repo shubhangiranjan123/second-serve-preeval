@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react'
 import { AlertTriangle, ArrowRight, ArrowUpRight, Bike, Building2, ClipboardList, PackageCheck, Plus, Route, Tv } from 'lucide-react'
 import type { AppState, Donation, TimelineKey } from '../types'
 import { assessFeasibility, formatClock, impactTotals, sameLocalDay } from '../lib/engine'
@@ -9,19 +8,7 @@ import { Garden } from '../components/Garden'
 import { CityMap } from '../components/CityMap'
 import { donorStreaks } from '../lib/streaks'
 import { useT } from '../lib/i18n'
-
-// UNEP Food Waste Index Report 2024: India ≈ 78.1 million tonnes of food waste a year (2022 data).
-const INDIA_KG_PER_SECOND = 78.1e9 / (365.25 * 24 * 3600)
-
-function WasteCounter() {
-  const [start] = useState(() => performance.now())
-  const [kg, setKg] = useState(0)
-  useEffect(() => {
-    const t = setInterval(() => setKg(((performance.now() - start) / 1000) * INDIA_KG_PER_SECOND), 90)
-    return () => clearInterval(t)
-  }, [start])
-  return <>{Math.floor(kg).toLocaleString('en-IN')}</>
-}
+import { WasteCounter } from '../components/WasteCounter'
 
 const eventIcon: Record<TimelineKey, typeof Bike> = {
   created: ClipboardList,

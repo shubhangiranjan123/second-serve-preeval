@@ -24,9 +24,22 @@ html[data-lang='pa'] h1, html[data-lang='pa'] h2, html[data-lang='pa'] h3, html[
   line-height: 1.18;
 }
 
-.cursor-glow, .confetti { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; }
-.cursor-glow { z-index: 190; }
-.confetti { z-index: 210; }
+.cursor-ring { position: fixed; left: 0; top: 0; width: 22px; height: 22px; margin: -11px 0 0 -11px; pointer-events: none; z-index: 300; will-change: transform; transition: opacity 0.3s; }
+.cursor-ring i { position: absolute; inset: 0; border-radius: 50%; border: 1px solid rgba(238, 244, 239, 0.35); transition: transform 0.35s var(--ease), border-color 0.3s, background 0.3s; }
+.cursor-ring.is-hot i { transform: scale(1.6); border-color: rgba(255, 138, 181, 0.55); background: rgba(255, 138, 181, 0.06); }
+.cursor-ring.is-hidden { opacity: 0 !important; }
+.cursor-pond { position: fixed; inset: 0; pointer-events: none; z-index: 299; overflow: hidden; }
+.cursor-ripple { position: absolute; width: 10px; height: 10px; margin: -5px 0 0 -5px; border-radius: 50%; border: 1px solid rgba(255, 138, 181, 0.5); opacity: 0; animation: cursorRipple 0.9s var(--ease) forwards; }
+@keyframes cursorRipple { 0% { transform: scale(0.4); opacity: 0.8; } 100% { transform: scale(6); opacity: 0; } }
+.topstack { position: sticky; top: 0; z-index: 30; }
+.topstack .topnav { position: relative; }
+.waste-bar { display: flex; align-items: baseline; justify-content: center; flex-wrap: wrap; gap: 4px 8px; padding: 9px 18px; background: #0f1714; border-bottom: 1px solid var(--line); font-size: 14.5px; color: var(--muted); text-align: center; }
+.waste-bar strong { font-family: var(--display); font-weight: 800; font-size: 20px; letter-spacing: -0.02em; color: var(--pink-soft); font-variant-numeric: tabular-nums; }
+.waste-bar-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--pink); align-self: center; animation: pulse 1.6s infinite; }
+.live .waste-bar { background: transparent; border: 0; margin-top: 10px; font-size: 16px; }
+.live .waste-bar strong { font-size: 24px; }
+.live-waste { position: relative; z-index: 2; text-align: center; margin-top: 14px; font-size: clamp(15px, 1.4vw, 19px); color: var(--muted); }
+.live-waste b { font-family: var(--display); font-weight: 800; color: var(--pink-soft); font-size: 1.35em; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 
 .lang-toggle { display: inline-flex; background: var(--ink-2); border: 1px solid var(--line-2); border-radius: 99px; padding: 3px; }
 .lang-toggle button { border: 0; background: none; color: var(--muted); font-weight: 700; font-size: 13px; padding: 6px 10px; border-radius: 99px; min-width: 36px; transition: background 0.2s, color 0.2s; }

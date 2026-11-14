@@ -6,6 +6,7 @@ import { DripUnderline, FallingDrop, Wordmark } from '../components/Art'
 import { CountUp } from '../components/ui'
 import { Garden } from '../components/Garden'
 import { LangToggle } from '../components/Sidebar'
+import { WasteBar } from '../components/WasteCounter'
 import { chime, unlockAudio } from '../lib/sound'
 import { useT } from '../lib/i18n'
 
@@ -41,6 +42,7 @@ export function Live({ state, now, onExit }: { state: AppState; now: number; onE
           <X size={20} />
         </button>
       </header>
+      <WasteBar />
       <div className="live-center">
         <span className="live-lead">{t('Meals rescued today')}</span>
         <div className="waste-number live-number" key={meals}>
