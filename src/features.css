@@ -273,7 +273,7 @@ html[data-lang='pa'] h1, html[data-lang='pa'] h2, html[data-lang='pa'] h3, html[
 .sound-hint:hover { color: var(--pink); border-color: var(--pink); }
 
 .nav-link, .wordmark { white-space: nowrap; }
-@media (max-width: 1520px) {
+@media (max-width: 1720px) {
   .topnav { gap: 16px; }
   .nav-link { padding: 9px 10px; font-size: 14.5px; }
   .room-btn span { display: none; }
@@ -299,3 +299,6 @@ html[data-lang='pa'] h1, html[data-lang='pa'] h2, html[data-lang='pa'] h3, html[
   .garden-bar { width: 200px; }
   .garden-stage { aspect-ratio: 1200 / 760; }
 }
+
+html, body { overflow-x: clip; }
+.home { overflow-x: clip; }

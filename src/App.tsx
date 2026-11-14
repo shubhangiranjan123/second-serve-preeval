@@ -15,7 +15,6 @@ import { Impact } from './views/Impact'
 import { Live } from './views/Live'
 import { MapView } from './views/MapView'
 import { Cursor } from './components/Cursor'
-import { WasteBar } from './components/WasteCounter'
 import { chime } from './lib/sound'
 import { SPECIES, milestoneReached, MILESTONES } from './lib/garden'
 import { useT } from './lib/i18n'
@@ -157,10 +156,7 @@ export default function App() {
   return (
     <div className="shell">
       <Grain />
-      <div className="topstack">
-        <WasteBar />
-        <TopNav view={view} onNavigate={navigate} counts={counts} onAdd={() => setFormOpen(true)} />
-      </div>
+      <TopNav view={view} onNavigate={navigate} counts={counts} onAdd={() => setFormOpen(true)} />
 
       <main className={cx('content', view === 'home' && 'content-home')} key={view}>
         {view === 'home' && <Home state={state} now={now} onAdd={() => setFormOpen(true)} onOpen={openFile} onNavigate={navigate} />}
