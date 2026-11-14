@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Plus, Search } from 'lucide-react'
+import { Plus, ScanLine, Search } from 'lucide-react'
 import type { AppState, Category, Donation } from '../types'
 import { CATEGORIES } from '../data/demoData'
 import { assessFeasibility } from '../lib/engine'
@@ -7,17 +7,27 @@ import { DonationCard } from '../components/DonationCard'
 import { Eyebrow, cx } from '../components/ui'
 import { useT } from '../lib/i18n'
 
-type StatusFilter = 'All' | 'Available' | 'In rescue' | 'Delivered'
+type StatusFilter = 'All' | 'In review' | 'Available' | 'In rescue' | 'Delivered'
+
+const FILTERS: StatusFilter[] = ['All', 'In review', 'Available', 'In rescue', 'Delivered']
+
+function statusMatches(s: StatusFilter, d: Donation) {
+  if (s === 'All') return true
+  if (s === 'In rescue') return d.status === 'Reserved'
+  return d.status === s
+}
 
 export function RescueBoard({
   state,
   now,
   onAdd,
+  onScan,
   onOpen,
 }: {
   state: AppState
   now: number
   onAdd: () => void
+  onScan: () => void
   onOpen: (d: Donation) => void
 }) {
   const { t } = useT()
@@ -26,18 +36,10 @@ export function RescueBoard({
   const [q, setQ] = useState('')
 
   const list = useMemo(() => {
-    const order = { Available: 0, Reserved: 1, Delivered: 2 }
+    const order: Record<Donation['status'], number> = { 'In review': 0, Available: 1, Reserved: 2, Delivered: 3 }
     return state.donations
       .filter((d) => cat === 'All food' || d.category === cat)
-      .filter((d) =>
-        status === 'All'
-          ? true
-          : status === 'Available'
-            ? d.status === 'Available'
-            : status === 'In rescue'
-              ? d.status === 'Reserved'
-              : d.status === 'Delivered',
-      )
+      .filter((d) => statusMatches(status, d))
       .filter((d) => {
         const s = q.trim().toLowerCase()
         return !s || `${d.name} ${d.donor} ${d.area}`.toLowerCase().includes(s)
@@ -49,10 +51,7 @@ export function RescueBoard({
       )
   }, [state.donations, cat, status, q, now])
 
-  const count = (s: StatusFilter) =>
-    state.donations.filter((d) =>
-      s === 'All' ? true : s === 'Available' ? d.status === 'Available' : s === 'In rescue' ? d.status === 'Reserved' : d.status === 'Delivered',
-    ).length
+  const count = (s: StatusFilter) => state.donations.filter((d) => statusMatches(s, d)).length
 
   return (
     <div className="view">
@@ -64,9 +63,14 @@ export function RescueBoard({
           </h1>
           <p className="view-lede">{t('Every listing carries a live safe-time countdown, a feasibility verdict and a bud that wilts as time runs out. Most urgent first.')}</p>
         </div>
-        <button className="btn btn-primary btn-lg" onClick={onAdd}>
-          <Plus size={18} /> {t('List surplus food')}
-        </button>
+        <div className="view-head-actions">
+          <button className="btn btn-ghost-light btn-lg" onClick={onAdd}>
+            <Plus size={18} /> {t('List manually')}
+          </button>
+          <button className="btn btn-primary btn-lg" onClick={onScan}>
+            <ScanLine size={18} /> {t('Scan & donate')}
+          </button>
+        </div>
       </header>
 
       <div className="filters">
@@ -79,7 +83,7 @@ export function RescueBoard({
         </div>
         <div className="filters-right">
           <div className="segmented small" role="group" aria-label="Status">
-            {(['All', 'Available', 'In rescue', 'Delivered'] as const).map((s) => (
+            {FILTERS.filter((s) => s !== 'In review' || count(s) > 0).map((s) => (
               <button key={s} className={cx(status === s && 'on')} onClick={() => setStatus(s)}>
                 {t(s)} <em>{count(s)}</em>
               </button>

@@ -1,4 +1,4 @@
-import { ArrowUpRight, Clock, MapPin, Snowflake, Users } from 'lucide-react'
+import { ArrowUpRight, Clock, MapPin, ShieldQuestion, Snowflake, Sparkles, Users } from 'lucide-react'
 import type { AppState, Donation } from '../types'
 import { assessFeasibility, formatClock, minutesBetween } from '../lib/engine'
 import { streakFor } from '../lib/streaks'
@@ -25,19 +25,25 @@ export function DonationCard({
   const feas = assessFeasibility(d, now)
   const ngo = state.ngos.find((n) => n.id === d.ngoId)
   const delivered = d.status === 'Delivered'
-  const tone = delivered ? 'done' : feas.verdict === 'Feasible' ? 'ok' : feas.verdict === 'At risk' ? 'warn' : 'bad'
-  const stamp = delivered ? null : d.status === 'Reserved' ? null : feas.verdict === 'Feasible' ? t('SAFE TO GO') : feas.verdict === 'At risk' ? t('HURRY') : t('TOO LATE')
+  const inReview = d.status === 'In review'
+  const tone = delivered ? 'done' : inReview ? 'review' : feas.verdict === 'Feasible' ? 'ok' : feas.verdict === 'At risk' ? 'warn' : 'bad'
+  const stamp = delivered || inReview ? null : d.status === 'Reserved' ? null : feas.verdict === 'Feasible' ? t('SAFE TO GO') : feas.verdict === 'At risk' ? t('HURRY') : t('TOO LATE')
   const streak = streakFor(state.history, d.donor, now)
 
   return (
     <article className={cx('dcard', `dcard-${tone}`, d.status === 'Reserved' && 'dcard-moving')} style={{ animationDelay: `${index * 55}ms` }}>
       <div className="dcard-top">
         <div className="dcard-ring">
-          <ClockRing minutesLeft={left} tone={tone} />
+          <ClockRing minutesLeft={left} tone={tone === 'review' ? 'warn' : tone} />
           <Bud d={d} now={now} size={50} />
         </div>
         <div className="dcard-tags">
           <StatusPill status={d.status} stage={d.stage} />
+          {d.screening && !inReview && (
+            <span className="ai-chip" title={t('Screened by AI vision + safety rules. Not a food-safety certification.')}>
+              <Sparkles size={12} /> {t('AI-screened')}
+            </span>
+          )}
           {stamp && <Stamp tone={tone === 'bad' ? 'ink' : 'pink'}>{stamp}</Stamp>}
         </div>
       </div>
@@ -59,7 +65,11 @@ export function DonationCard({
         </span>
       </div>
       <p className="dcard-line">
-        {delivered
+        {inReview ? (
+          <>
+            <ShieldQuestion size={13} /> {t('Waiting for a coordinator to inspect it')}
+          </>
+        ) : delivered
           ? t('Delivered to {name}', { name: ngo?.name ?? '—' })
           : d.status === 'Reserved'
             ? `${t('On its way')} → ${ngo?.name ?? '—'} · ${d.stage === 'Pending' ? t('needs a runner') : t(d.stage).toLowerCase()}`

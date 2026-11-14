@@ -1,12 +1,11 @@
 import { useEffect, useMemo } from 'react'
-import { ArrowUpRight, Bike, Clock, MapPin, PackageCheck, Route, Snowflake, Undo2, Users, X } from 'lucide-react'
+import { ArrowUpRight, Bike, Clock, MapPin, PackageCheck, Route, ShieldCheck, Snowflake, Sparkles, Trash2, Undo2, Users, X } from 'lucide-react'
 import type { AppState, Donation } from '../types'
 import {
   assessFeasibility,
   evaluateNgo,
   formatClock,
   formatDuration,
-  matchNgos,
   minutesBetween,
   runnerOptions,
 } from '../lib/engine'
@@ -19,6 +18,9 @@ import { StatusPill, cx } from './ui'
 import { Receipt } from './Receipt'
 import { useT } from '../lib/i18n'
 import { Bud } from './Bud'
+import { runMatchingPipeline } from '../lib/pipeline'
+import { PipelineTrack, trackFor } from './PipelineTrack'
+import { RuleList } from './DonationForm'
 
 type Props = {
   donation: Donation
@@ -28,9 +30,10 @@ type Props = {
   toast: (msg: string, tone?: 'ok' | 'info' | 'warn') => void
   onClose: () => void
   onOpenImpact: () => void
+  onApprove?: (d: Donation) => void
 }
 
-export function RescueFile({ donation: d, state, now, store, toast, onClose, onOpenImpact }: Props) {
+export function RescueFile({ donation: d, state, now, store, toast, onClose, onOpenImpact, onApprove }: Props) {
   const { t } = useT()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
@@ -54,10 +57,12 @@ export function RescueFile({ donation: d, state, now, store, toast, onClose, onO
     return assessFeasibility(d, now, matchEval?.travelMin)
   }, [d, now, matchEval])
 
-  const match = useMemo(
-    () => (d.status === 'Available' ? matchNgos(d, state.ngos, state.donations, state.history, now) : null),
-    [d, state.ngos, state.donations, state.history, now],
+  // Engine 2 (4-stage pipeline). Runs only for listings that are on the board.
+  const pipeline = useMemo(
+    () => (d.status === 'Available' ? runMatchingPipeline(d, state, now) : null),
+    [d, state, now],
   )
+  const sc = d.screening
 
   const runners = useMemo(() => runnerOptions(d, state.runners, state.donations), [d, state.runners, state.donations])
 
@@ -97,6 +102,70 @@ export function RescueFile({ donation: d, state, now, store, toast, onClose, onO
         {d.description && <p className="drawer-desc">{d.description}</p>}
 
         <div className="drawer-body">
+          {(sc || d.status === 'In review') && <PipelineTrack states={trackFor(d, pipeline)} compact />}
+
+          {/* 00 — AI verification (Engine 1), only for scanned listings */}
+          {sc && (
+            <section className={cx('step', 'step-ai', d.status === 'In review' && 'step-review')}>
+              <div className="step-label"><span>00</span> {t('AI food check')}</div>
+              <div className="ai-summary">
+                {sc.photo ? <img src={sc.photo} alt={t('Donor photo')} /> : <span className="ai-thumb-empty" />}
+                <div>
+                  <span className={cx('visual-verdict', `vv-${sc.visual.replace(/\s/g, '-').toLowerCase()}`)}>{t(sc.visual)}</span>
+                  <strong>
+                    {d.status === 'In review'
+                      ? t('Held for a human check')
+                      : sc.review
+                        ? t('Approved by a coordinator')
+                        : t('Passed screening')}
+                  </strong>
+                  <span>
+                    {sc.ai ? (
+                      <>
+                        <Sparkles size={12} /> {sc.ai.dishName} · {sc.ai.model} · {Math.round(sc.ai.confidence.overall * 100)}% {t('confident')}
+                      </>
+                    ) : (
+                      t('No AI reading: {why}', { why: sc.aiError ?? 'not scanned' })
+                    )}
+                  </span>
+                  {sc.edited.length > 0 && <span>{t('Donor corrected')}: {sc.edited.join(', ')}</span>}
+                </div>
+              </div>
+              {d.status === 'In review' && sc.reviewReasons.length > 0 && (
+                <ul className="review-reasons">
+                  {sc.reviewReasons.map((r) => (
+                    <li key={r}>{r}</li>
+                  ))}
+                </ul>
+              )}
+              <details className="rule-details" open={d.status === 'In review'}>
+                <summary>{t('All {n} checks', { n: sc.rules.length })}</summary>
+                <RuleList rules={sc.rules} />
+              </details>
+              {d.status === 'In review' && (
+                <div className="review-actions">
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => onApprove?.(d)}
+                  >
+                    <ShieldCheck size={16} /> {t('I inspected it: approve & match')}
+                  </button>
+                  <button
+                    className="btn btn-ghost"
+                    onClick={() => {
+                      store.withdraw(d.id)
+                      toast(t('Listing rejected and removed.'), 'warn')
+                      onClose()
+                    }}
+                  >
+                    <Trash2 size={16} /> {t('Reject')}
+                  </button>
+                </div>
+              )}
+              <p className="feas-disclaimer">{t('Screening aid only — a photo cannot show temperature history, germs or allergens. Not a food-safety certification.')}</p>
+            </section>
+          )}
+
           {/* 01 — Feasibility */}
           <section className="step">
             <div className="step-label"><span>01</span> {t('Rescue feasibility')}</div>
@@ -127,12 +196,14 @@ export function RescueFile({ donation: d, state, now, store, toast, onClose, onO
           {/* 02 — Matching */}
           <section className="step">
             <div className="step-label"><span>02</span> {t('Smart NGO matching')}</div>
-            {match ? (
+            {d.status === 'In review' ? (
+              <p className="step-muted">{t('Locked until a coordinator approves the food check above.')}</p>
+            ) : pipeline ? (
               safeLeft <= 0 ? (
                 <p className="step-muted">{t('Safe window closed — matching is switched off for this listing.')}</p>
               ) : (
                 <MatchPanel
-                  result={match}
+                  pipeline={pipeline}
                   scanKey={d.id}
                   onReserve={(e) => {
                     store.reserve(d.id, e.ngo.id, e.score)
@@ -165,9 +236,9 @@ export function RescueFile({ donation: d, state, now, store, toast, onClose, onO
           </section>
 
           {/* 03 — Dispatch */}
-          <section className={cx('step', d.status === 'Available' && 'step-locked')}>
+          <section className={cx('step', (d.status === 'Available' || d.status === 'In review') && 'step-locked')}>
             <div className="step-label"><span>03</span> {t('Runner dispatch')}</div>
-            {d.status === 'Available' && <p className="step-muted">{t('Reserve an organisation first.')}</p>}
+            {(d.status === 'Available' || d.status === 'In review') && <p className="step-muted">{t('Reserve an organisation first.')}</p>}
             {d.status !== 'Available' && runner && (
               <div className="runner-chosen">
                 <span className="avatar">{runner.initials}</span>

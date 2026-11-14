@@ -19,21 +19,23 @@ Open **PowerShell** or **Command Prompt** in the folder where you unzipped the p
 ```powershell
 cd second-serve-preeval
 npm install
+copy .env.example .env        # macOS/Linux: cp .env.example .env
+# open .env and paste a key after GEMINI_API_KEY=  (free: https://aistudio.google.com/app/apikey)
 npm run dev
 ```
 
-Open the address it prints, usually **http://localhost:5173**.
+`npm run dev` starts **two** things: the AI backend on port 8787 (holds the API key) and the app on **http://localhost:5173**. Vite forwards `/api` to the backend, so the key never reaches the browser.
 
-For a production build:
+Without a key everything still works except the photo scan: the scanner says it isn't configured, and a donor can continue without AI (the listing then needs a coordinator's approval before matching).
+
+For a production build served by one process:
 
 ```powershell
 npm run build
-npm run preview
+npm run start        # app + API on http://localhost:8787
 ```
 
-`npm run preview` serves the built app at http://localhost:4173.
-
-Type-check only: `npm run typecheck`
+Tests: `npm test` (44 tests: safety rules, matching pipeline, API server). Type-check only: `npm run typecheck`
 
 macOS and Linux use the same commands.
 
@@ -49,6 +51,14 @@ second-serve-preeval/
 ├── package.json               # 3 runtime deps: react, react-dom, lucide-react
 ├── vite.config.ts
 ├── tsconfig*.json             # strict TypeScript
+├── .env.example               # AI keys go in .env (git-ignored)
+├── server/                    # AI backend, no dependencies
+│   ├── index.mjs              # starts API (+ serves dist/ with --static)
+│   ├── app.mjs                # /api/health, /api/food-scan: validation, rate limit, errors
+│   ├── providers.mjs          # Gemini + Claude vision adapters (swappable)
+│   ├── scanSchema.mjs         # prompt, JSON schema, reply normaliser
+│   └── dev.mjs                # runs API + Vite together
+├── tests/                     # vitest: rules, pipeline, server
 ├── public/favicon.svg
 └── src/
     ├── main.tsx               # entry
@@ -59,12 +69,17 @@ second-serve-preeval/
     │   └── demoData.ts        # Chandigarh demo areas, donations, NGOs, runners, seed history
     ├── lib/
     │   ├── engine.ts          # PURE logic: feasibility, matching, capacity, runner suggestion, impact
+    │   ├── foodScan.ts        # Engine 1 client: resize photo, call /api/food-scan
+    │   ├── verification.ts    # Engine 1 safety rules → pass / review / reject
+    │   ├── pipeline.ts        # Engine 2: gates → rank (+TOPSIS, stability) → feasibility → recommendation
     │   └── useRescueStore.ts  # state + actions + localStorage persistence
     ├── components/
     │   ├── Art.tsx            # wordmark, drip underline, falling drops, grain, clock rings, stamps
     │   ├── Sidebar.tsx        # top navigation (TopNav) + route list
     │   ├── Receipt.tsx        # rescue receipt + download-as-PNG (canvas)
-    │   ├── DonationForm.tsx   # listing form + safe-handling checklist + live feasibility preview
+    │   ├── FoodScan.tsx       # Scan & donate: camera/upload, analysing, retry
+    │   ├── PipelineTrack.tsx  # the dual-engine track
+    │   ├── DonationForm.tsx   # listing form (manual or AI-prefilled) + live safety screening + feasibility
     │   ├── DonationCard.tsx   # Rescue board card
     │   ├── RescueFile.tsx     # the drawer: feasibility → matching → dispatch → tracking
     │   ├── FeasibilityMeter.tsx
@@ -111,7 +126,7 @@ second-serve-preeval/
 
 ## 4. Architecture
 
-- **No backend, on purpose.** All state lives in one `AppState` object (`donations`, `ngos`, `runners`, `history`). It's held by the `useRescueStore` hook and written to localStorage on every change.
+- **A tiny backend, only for AI.** `server/` (zero npm dependencies) exists only to keep the vision API key off the browser. App data still lives in one `AppState` object (`donations`, `ngos`, `runners`, `history`). It's held by the `useRescueStore` hook and written to localStorage on every change.
 - **Pure engine.** `lib/engine.ts` has no React, no storage and no `Date.now()`; the current time is passed in. Every number on screen comes from these functions, which makes them easy to explain and to unit test.
 - **Derived, not stored.** NGO capacity, feasibility verdicts, pipeline counts and impact totals are recalculated on every render, so they can't drift out of sync. The only stored counter is the permanent `history`.
 - **Delivered-only impact.** A `RescueRecord` is written only when a rescue reaches *Delivered*. It's keyed by donation id, so a repeated click or a refresh can never double count. This is the same "lifetime rescues" rule as the full build.
@@ -181,6 +196,41 @@ Ties go to the shorter travel time.
 
 ---
 
+## 5b. Dual-engine AI (Scan & donate)
+
+```
+ ENGINE 1 · verify the food                         ENGINE 2 · find the recipient
+ ┌───────┐  ┌──────────┐  ┌──────────────┐  ┌─────────┐   ┌──────────┐  ┌────────┐  ┌─────────────┐  ┌──────────┐
+ │ Photo │→ │ Vision AI│→ │ Safety rules │→ │ Listing │ → │ 7 gates  │→ │  Rank  │→ │ Feasibility │→ │ Dispatch │
+ └───────┘  └──────────┘  └──────────────┘  └─────────┘   └──────────┘  └────────┘  └─────────────┘  └──────────┘
+  browser    server/        lib/               useRescue   engine.ts      engine.ts    pipeline.ts      existing
+  shrinks,   providers.mjs  verification.ts    Store       (unchanged)    + TOPSIS     (real runner     runner flow
+  strips GPS (Gemini|Claude) (pure rules)      (same data)                + stability   ETA)
+```
+
+**What is AI and what isn't.** Only the *Vision AI* step is machine learning (a hosted vision-language model). Everything after it — safety rules, gates, ranking, TOPSIS, feasibility — is deterministic code you can read and test.
+
+**Engine 1.** The photo is resized in the browser (≤1024 px JPEG, EXIF/GPS stripped) and posted to `/api/food-scan`. The server checks type, real file signature and size, rate-limits, and calls the configured model with a strict JSON schema. The reply is normalised (`server/scanSchema.mjs`): unknown or malformed fields become "Unknown" / "uncertain" / confidence 0 — nothing is invented. Then `lib/verification.ts` combines the AI reading with the donor's declarations:
+
+| Outcome | When | What happens |
+|---|---|---|
+| **Pass** | No rule fails, nothing needs a human | Published as *AI-screened*, matched and reserved automatically |
+| **Review** | Low confidence, unclear photo, medium visual concern, diet/packaging contradiction, or the AI was unavailable | Listed as **In review**. Matching is locked until a coordinator approves |
+| **Reject** | High-severity visual concern (mould, spoilage…), not food, cooked food over 2 h at room temperature, open packaging for meals, contradictory timing | Can't be published |
+| **Incomplete** | Missing cooked time, packaging, checklist… | Can't be submitted yet |
+
+Visual verdict shown separately: *Visually acceptable / Potentially unsuitable / Uncertain / Not scanned*. "Visually acceptable" never means safe; every screen says so.
+
+**Engine 2** (`lib/pipeline.ts`) wraps the existing engine without changing it:
+1. **Hard gates** — the existing seven (verified, accepting, storage type + free unit space, diet, capacity, open on arrival, arrives ≥15 min before the deadline). Exclusions are tagged with the gate that failed.
+2. **Ranking** — the existing weighted score (compat 30, travel 25, need 20, safety 15, hours 10), shown as points per criterion. Cross-checked with **TOPSIS** and a **weight-sensitivity test** (each weight ±25 %, 10 trials).
+3. **Feasibility** — every ranked NGO is re-timed with the *real* pickup: the nearest free runner's ETA to the donor (stage 1 assumes a flat 10 min). Uses the existing `assessFeasibility`. A high score never beats the clock.
+4. **Recommendation** — first NGO in score order that survives step 3, with alternatives, exclusions, and plain-language reasons. If none survive, the listing stays on the board, unmatched.
+
+**Why a weighted score and not TOPSIS as the primary method.** TOPSIS normalises each criterion *relative to the other candidates*, so (a) adding or removing an NGO can reorder the others (rank reversal), (b) with one candidate it's meaningless, and (c) its closeness value can't be split into "this many points came from travel time". The weighted score uses fixed anchors (0–45 min travel, 0–120 min margin…), so 80/100 means the same thing tomorrow and every point is explainable. TOPSIS still runs as a cross-check; on the bakery demo listing it disagrees (three NGOs within 4 points), which the panel shows honestly. An assignment optimiser (e.g. Hungarian / ILP) only pays off when many donations are matched at once; donations arrive one at a time here, so greedy per donation is optimal. Learned/hybrid recommenders need acceptance history that doesn't exist yet.
+
+**Config** (`.env`, never committed): `GEMINI_API_KEY` *or* `ANTHROPIC_API_KEY`; optional `VISION_PROVIDER`, `GEMINI_MODEL` (default `gemini-2.5-flash`), `ANTHROPIC_MODEL` (default `claude-haiku-5-5`), `VISION_TIMEOUT_MS` (25000), `PORT` (8787), `GEMINI_BASE_URL` (proxy). To add a provider, add one function to `server/providers.mjs`.
+
 ## 6. Demo data
 
 Chandigarh, with approximate sector coordinates.
@@ -236,6 +286,9 @@ Now point at the projector: the **RESCUED** stamp lands, the counter jumps, a da
 - NGO verification is shown but **can't be edited** in this build.
 - Safe windows are the **donor's own judgement**. The platform doesn't certify food safety.
 - Impact figures are **estimates** with stated assumptions.
+- **AI scan:** a photo can't show temperature history, microbes or allergens; the scan is a screening aid. The 2-hour room-temperature and 24-hour chilled limits are platform policy, not a legal standard. Model accuracy on Indian dishes hasn't been measured here.
+- **Manual review** has no login: anyone using the coordinator view can approve. The plain *List manually* form still bypasses the photo scan (as before); add a policy if every listing must be scanned.
+- New interface text is English only (the EN/हि/ਪੰ toggle falls back to English for it).
 - The Room wall syncs between tabs of one browser on one machine. Phones and other devices need a shared backend (planned for the full build).
 - The India food-waste counter is an estimate from an annual rate (UNEP Food Waste Index Report 2024, 2022 data), not live data.
 
@@ -248,7 +301,7 @@ Now point at the projector: the **RESCUED** stamp lands, the counter jumps, a da
 
 **Planned for the full build (not in either version yet):**
 - A real-time shared backend, so a donor can list from their phone via an on-screen QR code.
-- AI photo-to-form listing, or listing over WhatsApp.
+- ~~AI photo-to-form listing~~ (done: Scan & donate). Listing over WhatsApp.
 - NGO accept/decline with automatic fallback to the next match.
 - QR-verified handover at delivery.
 - Multi-pickup route batching for one runner.

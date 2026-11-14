@@ -53,6 +53,7 @@ export function VerdictPill({ verdict, large }: { verdict: Verdict; large?: bool
 
 export function StatusPill({ status, stage }: { status: DonationStatus; stage: DispatchStage }) {
   const { t } = useT()
+  if (status === 'In review') return <span className="status status-review">{t('In review')}</span>
   if (status === 'Available') return <span className="status status-available">{t('Available')}</span>
   if (status === 'Delivered') return <span className="status status-delivered">{t('Delivered')}</span>
   const label = stage === 'Pending' ? t('Matched · awaiting runner') : t(stage)

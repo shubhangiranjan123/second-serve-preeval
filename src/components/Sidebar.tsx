@@ -1,4 +1,4 @@
-import { BarChart3, Bike, Building2, Home, Map, Plus, Soup, Tv } from 'lucide-react'
+import { BarChart3, Bike, Building2, Home, Map, Plus, ScanLine, Soup, Tv } from 'lucide-react'
 import { Wordmark } from './Art'
 import { cx } from './ui'
 import { LANGS, useT } from '../lib/i18n'
@@ -32,11 +32,13 @@ export function TopNav({
   onNavigate,
   counts,
   onAdd,
+  onScan,
 }: {
   view: View
   onNavigate: (v: View) => void
   counts: Partial<Record<View, number>>
   onAdd: () => void
+  onScan: () => void
 }) {
   const { t } = useT()
   return (
@@ -73,8 +75,11 @@ export function TopNav({
         <button className="btn btn-ghost-light room-btn" onClick={() => onNavigate('live')}>
           <Tv size={16} /> <span>{t('Room wall')}</span>
         </button>
-        <button className="btn btn-pink" onClick={onAdd}>
-          <Plus size={17} /> <span>{t('List surplus food')}</span>
+        <button className="btn btn-ghost-light scan-btn" onClick={onAdd} title={t('List surplus food')}>
+          <Plus size={17} /> <span>{t('List manually')}</span>
+        </button>
+        <button className="btn btn-pink" onClick={onScan}>
+          <ScanLine size={17} /> <span>{t('Scan & donate')}</span>
         </button>
       </div>
     </header>

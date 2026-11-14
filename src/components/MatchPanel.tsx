@@ -1,23 +1,15 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, Ban, Check, ChevronDown, Snowflake, X } from 'lucide-react'
+import { AlertTriangle, Ban, Bike, Check, ChevronDown, Clock, Scale, Snowflake, X } from 'lucide-react'
 import {
   COMPAT_LABELS,
   MATCH_WEIGHTS,
   formatClock,
   type CompatKey,
-  type MatchResult,
   type NgoEvaluation,
 } from '../lib/engine'
+import { CRITERIA, GATES, gateOf, type Candidate, type PipelineResult } from '../lib/pipeline'
 import { useT } from '../lib/i18n'
-import { ScoreRing, cx } from './ui'
-
-const factorLabels: Array<[keyof typeof MATCH_WEIGHTS, string]> = [
-  ['compat', 'Compatibility'],
-  ['travel', 'Travel time'],
-  ['need', 'Unused capacity'],
-  ['safety', 'Safety margin'],
-  ['hours', 'Opening hours'],
-]
+import { ScoreRing, VerdictPill, cx } from './ui'
 
 const COMPAT_ORDER: CompatKey[] = ['storage', 'cold', 'diet', 'wants', 'timing', 'reheat']
 
@@ -97,27 +89,43 @@ function UnitGauge({ e }: { e: NgoEvaluation }) {
   )
 }
 
-function MatchCard({ e, rank, onReserve }: { e: NgoEvaluation; rank: number; onReserve: () => void }) {
+function MatchCard({
+  c,
+  recommended,
+  index,
+  onReserve,
+}: {
+  c: Candidate
+  recommended: boolean
+  index: number
+  onReserve: () => void
+}) {
   const { t } = useT()
-  const [open, setOpen] = useState(rank === 0)
+  const e = c.e
+  const [open, setOpen] = useState(recommended)
   return (
-    <article className={cx('match', rank === 0 && 'match-best')} style={{ animationDelay: `${rank * 80}ms` }}>
+    <article className={cx('match', recommended && 'match-best', !c.feasible && 'match-infeasible')} style={{ animationDelay: `${index * 80}ms` }}>
       <header className="match-head">
         <ScoreRing score={e.score} />
         <div className="match-title">
-          {rank === 0 && <span className="match-flag">{t('Best match')}</span>}
+          {recommended && <span className="match-flag">{t('Recommended')}</span>}
           <h4>
             {e.ngo.name}
             <span className="compat-chip">{t('{n}% compatible', { n: e.compat })}</span>
           </h4>
           <span className="match-sub">
-            {e.ngo.type} · {e.ngo.area} · {t('arrives')} ≈ {formatClock(e.arrival)}
+            #{c.rank} {t('by score')} · {e.ngo.type} · {e.ngo.area} · {t('arrives')} ≈ {formatClock(c.arrival)}
           </span>
         </div>
         <button className="icon-btn" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-label="Toggle details">
           <ChevronDown size={18} className={cx('chev', open && 'chev-open')} />
         </button>
       </header>
+
+      <div className="feas-line">
+        {c.feasible ? <VerdictPill verdict={c.feasibility.verdict} /> : <span className="verdict verdict-bad"><Ban size={13} /> {t('Can’t make it')}</span>}
+        <span>{c.feasibilityNote}</span>
+      </div>
 
       {open && (
         <div className="match-body">
@@ -132,17 +140,27 @@ function MatchCard({ e, rank, onReserve }: { e: NgoEvaluation; rank: number; onR
             </div>
           </div>
           <div className="factors">
-            {factorLabels.map(([k, label]) => (
-              <div className="factor" key={k}>
-                <span>{t(label)}</span>
+            {CRITERIA.map(({ key, label, type }) => (
+              <div className="factor" key={key}>
+                <span>
+                  {t(label)}
+                  {type === 'cost' && <small> · {t('lower is better')}</small>}
+                </span>
                 <div className="factor-bar">
-                  <i style={{ width: `${Math.round(e.breakdown[k] * 100)}%` }} />
+                  <i style={{ width: `${Math.round(e.breakdown[key] * 100)}%` }} />
                 </div>
                 <em>
-                  {Math.round(e.breakdown[k] * MATCH_WEIGHTS[k] * 100)}/{Math.round(MATCH_WEIGHTS[k] * 100)}
+                  {c.points[key].toFixed(0)}/{Math.round(MATCH_WEIGHTS[key] * 100)}
                 </em>
               </div>
             ))}
+            <div className="factor factor-topsis">
+              <span>{t('TOPSIS cross-check')}</span>
+              <div className="factor-bar">
+                <i style={{ width: `${Math.round(c.topsis * 100)}%` }} />
+              </div>
+              <em>#{c.topsisRank}</em>
+            </div>
           </div>
           <ul className="reasons">
             {e.reasons.map((r) => (
@@ -159,26 +177,26 @@ function MatchCard({ e, rank, onReserve }: { e: NgoEvaluation; rank: number; onR
         </div>
       )}
 
-      <button className="btn btn-primary btn-block" onClick={onReserve}>
-        {t('Reserve for {name}', { name: e.ngo.name.split(' ')[0] })}
+      <button className="btn btn-primary btn-block" onClick={onReserve} disabled={!c.feasible}>
+        {c.feasible ? t('Reserve for {name}', { name: e.ngo.name.split(' ')[0] }) : t('Not reachable in time')}
       </button>
     </article>
   )
 }
 
 export function MatchPanel({
-  result,
+  pipeline,
   scanKey,
   onReserve,
 }: {
-  result: MatchResult
+  pipeline: PipelineResult
   scanKey: number
   onReserve: (e: NgoEvaluation) => void
 }) {
   const { t } = useT()
   const [scanning, setScanning] = useState(true)
   const [showExcluded, setShowExcluded] = useState(true)
-  const total = result.eligible.length + result.excluded.length
+  const p = pipeline
 
   useEffect(() => {
     setScanning(true)
@@ -189,21 +207,46 @@ export function MatchPanel({
   if (scanning) {
     return (
       <div className="match-scan" aria-live="polite">
-        <span className="spinner" /> {t('Checking {n} organisations against 7 safety gates and 6 compatibility factors…', { n: total })}
+        <span className="spinner" /> {t('Checking {n} organisations against 7 safety gates and 6 compatibility factors…', { n: p.checked })}
         <div className="skeleton" />
         <div className="skeleton short" />
       </div>
     )
   }
 
+  // Score order, with the recommendation surfaced first if a higher score was skipped.
+  const order = p.recommended ? [p.recommended, ...p.ranked.filter((c) => c !== p.recommended)] : p.ranked
+
   return (
     <div className="match-panel">
+      <div className={cx('reco', p.status === 'matched' ? 'reco-ok' : 'reco-none')}>
+        <div className="reco-head">
+          {p.status === 'matched' ? <Scale size={20} /> : <Ban size={20} />}
+          <strong>{p.headline}</strong>
+          {p.stability && p.stability.label !== 'Only option' && p.status === 'matched' && (
+            <span className={cx('stab', `stab-${p.stability.label.replace(' ', '-').toLowerCase()}`)}>{t(p.stability.label)}</span>
+          )}
+        </div>
+        <ul>
+          {p.explanation.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+        {p.status === 'matched' && (
+          <p className="reco-runner">
+            {p.runnerConfirmed ? <Bike size={14} /> : <Clock size={14} />}
+            {p.runnerConfirmed ? t('Pickup timed with the nearest free runner') : t('Pickup time is an assumption: no free runner')}
+          </p>
+        )}
+      </div>
+
       <p className="match-summary">
-        {t('{a} of {b} organisations pass every gate', { a: result.eligible.length, b: total })}
-        {result.excluded.length > 0 && <> · {t('{n} excluded with reasons', { n: result.excluded.length })}</>}
+        {t('{a} of {b} organisations pass every gate', { a: p.eligible.length, b: p.checked })}
+        {p.infeasible.length > 0 && <> · {t('{n} fail the real-pickup check', { n: p.infeasible.length })}</>}
+        {p.excluded.length > 0 && <> · {t('{n} excluded with reasons', { n: p.excluded.length })}</>}
       </p>
 
-      {result.eligible.length === 0 && (
+      {p.eligible.length === 0 && (
         <div className="empty-match">
           <Ban size={20} />
           <div>
@@ -214,27 +257,30 @@ export function MatchPanel({
       )}
 
       <div className="match-list">
-        {result.eligible.map((e, i) => (
-          <MatchCard key={e.ngo.id} e={e} rank={i} onReserve={() => onReserve(e)} />
+        {order.map((c, i) => (
+          <MatchCard key={c.e.ngo.id} c={c} index={i} recommended={c === p.recommended} onReserve={() => onReserve(c.e)} />
         ))}
       </div>
 
-      {result.excluded.length > 0 && (
+      {p.excluded.length > 0 && (
         <div className="excluded">
           <button className="excluded-toggle" onClick={() => setShowExcluded((s) => !s)}>
-            {t('Excluded by safety gates ({n})', { n: result.excluded.length })}
+            {t('Excluded by safety gates ({n})', { n: p.excluded.length })}
             <ChevronDown size={16} className={cx('chev', showExcluded && 'chev-open')} />
           </button>
           {showExcluded && (
             <ul>
-              {result.excluded.map((e) => (
+              {p.excluded.map((e) => (
                 <li key={e.ngo.id}>
                   <strong>{e.ngo.name}</strong>
-                  {e.failures.map((f) => (
-                    <span key={f}>
-                      <X size={13} /> {f}
-                    </span>
-                  ))}
+                  {e.failures.map((f) => {
+                    const g = GATES.find((x) => x.id === gateOf(f))
+                    return (
+                      <span key={f}>
+                        <X size={13} /> {g && <b className="gate-tag">{t(g.label)}</b>} {f}
+                      </span>
+                    )
+                  })}
                 </li>
               ))}
             </ul>

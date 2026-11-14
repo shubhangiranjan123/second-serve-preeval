@@ -16,6 +16,7 @@ import '@fontsource/noto-sans-gurmukhi/gurmukhi-400.css'
 import '@fontsource/noto-sans-gurmukhi/gurmukhi-700.css'
 import './styles.css'
 import './features.css'
+import './ai.css'
 import App from './App'
 import { LangProvider } from './lib/i18n'
 

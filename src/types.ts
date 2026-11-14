@@ -7,8 +7,51 @@ export type Diet = 'Veg' | 'Non-veg' | 'Jain'
 
 export type Category = 'Meals' | 'Bakery' | 'Produce' | 'Dry rations'
 
-// Listing status on the Rescue Board (same three states as the final build).
-export type DonationStatus = 'Available' | 'Reserved' | 'Delivered'
+// Listing status on the Rescue Board. 'In review' is added by the AI Food
+// Scan pipeline: a listing that a person must inspect before it can be
+// matched. It is never visible to matching, the map or the counters.
+export type DonationStatus = 'In review' | 'Available' | 'Reserved' | 'Delivered'
+
+export type Packaging = 'Sealed' | 'Covered' | 'Open'
+
+// ---- Engine 1 (AI Food Verification) snapshot stored with a listing ----
+export type VisualVerdict = 'Visually acceptable' | 'Potentially unsuitable' | 'Uncertain' | 'Not scanned'
+export type RuleStatus = 'pass' | 'warn' | 'fail' | 'missing'
+export type RuleSource = 'AI vision' | 'Safety rule' | 'Donor input'
+export type RuleCheck = {
+  id: string
+  label: string
+  status: RuleStatus
+  detail: string
+  source: RuleSource
+  blocking?: boolean // a 'warn' that sends the listing to manual review
+}
+export type ScreeningOutcome = 'pass' | 'review' | 'reject' | 'incomplete'
+
+export type Screening = {
+  outcome: 'pass' | 'review' // rejected / incomplete scans are never listed
+  visual: VisualVerdict
+  rules: RuleCheck[]
+  reviewReasons: string[]
+  screenedAt: number
+  ai: null | {
+    provider: string
+    model: string
+    latencyMs: number
+    dishName: string
+    items: string[]
+    category: string
+    dietGuess: string
+    packaging: string
+    confidence: { overall: number; identification: number; condition: number }
+    concerns: Array<{ kind: string; detail: string; severity: string }>
+    reviewNotes: string[]
+  }
+  aiError?: string // why the scan could not run (then outcome is always 'review')
+  edited: string[] // fields the donor changed from the AI suggestion
+  photo?: string // small square thumbnail (data URL)
+  review?: { decision: 'approved'; at: number; by: string; note?: string }
+}
 
 // Runner Dispatch stage for a reserved donation.
 export type DispatchStage = 'Pending' | 'Assigned' | 'Picked Up' | 'Delivered'
@@ -46,6 +89,10 @@ export type Donation = {
   runnerId: number | null
   stage: DispatchStage
   timeline: TimelineEvent[]
+  // Optional, added by the AI Food Scan flow. Older listings simply lack them.
+  preparedAt?: number // when the food was cooked / prepared
+  packaging?: Packaging
+  screening?: Screening
 }
 
 export type VerificationStatus = 'Verified' | 'Pending'

@@ -4,6 +4,8 @@ import { useRescueStore } from './lib/useRescueStore'
 import { TopNav, NAV, type View } from './components/Sidebar'
 import { Toasts, type Toast } from './components/Toasts'
 import { DonationForm } from './components/DonationForm'
+import { FoodScan, type ScanHandoff } from './components/FoodScan'
+import { runMatchingPipeline } from './lib/pipeline'
 import { RescueFile } from './components/RescueFile'
 import { Drop, Grain, Wordmark } from './components/Art'
 import { cx } from './components/ui'
@@ -18,7 +20,7 @@ import { Cursor } from './components/Cursor'
 import { chime } from './lib/sound'
 import { SPECIES, milestoneReached, MILESTONES } from './lib/garden'
 import { useT } from './lib/i18n'
-import type { RescueRecord } from './types'
+import type { AppState, Donation, RescueRecord } from './types'
 
 const VIEWS: View[] = ['home', 'board', 'map', 'ngos', 'dispatch', 'impact', 'live']
 
@@ -48,6 +50,8 @@ export default function App() {
   const [view, setView] = useState<View>(readHash)
   const [openId, setOpenId] = useState<number | null>(null)
   const [formOpen, setFormOpen] = useState(false)
+  const [scanOpen, setScanOpen] = useState(false)
+  const [scanned, setScanned] = useState<ScanHandoff | undefined>(undefined)
   const [confirmReset, setConfirmReset] = useState(false)
   const [toasts, setToasts] = useState<Toast[]>([])
   const [celebrate, setCelebrate] = useState<RescueRecord | null>(null)
@@ -100,6 +104,29 @@ export default function App() {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3600)
   }, [])
 
+  // Engine 1 → Engine 2 handoff. Runs the matching pipeline on a freshly
+  // published (or freshly approved) listing and, if an NGO passes every
+  // gate AND the real-pickup feasibility check, reserves it straight away.
+  // The coordinator can still release it from the rescue file.
+  const autoMatch = useCallback(
+    (d: Donation, snapshot: AppState) => {
+      const p = runMatchingPipeline(d, snapshot, Date.now())
+      if (p.recommended) {
+        store.reserve(d.id, p.recommended.e.ngo.id, p.recommended.e.score)
+        toast(t('Published and matched to {name}. Now assign a runner.', { name: p.recommended.e.ngo.name }))
+      } else {
+        toast(t('Published, but no organisation can take it in time. It stays on the board, unmatched.'), 'warn')
+      }
+    },
+    [store, toast, t],
+  )
+
+  const openScan = () => {
+    setScanned(undefined)
+    setFormOpen(false)
+    setScanOpen(true)
+  }
+
   const open = state.donations.find((d) => d.id === openId) ?? null
   const counts = {
     board: state.donations.filter((d) => d.status === 'Available').length,
@@ -108,8 +135,8 @@ export default function App() {
   const openFile = (d: { id: number }) => setOpenId(d.id)
 
   useEffect(() => {
-    document.body.style.overflow = open || formOpen || confirmReset ? 'hidden' : ''
-  }, [open, formOpen, confirmReset])
+    document.body.style.overflow = open || formOpen || scanOpen || confirmReset ? 'hidden' : ''
+  }, [open, formOpen, scanOpen, confirmReset])
 
   const celebration = celebrate && (
     <div className="celebrate" aria-live="assertive">
@@ -156,11 +183,11 @@ export default function App() {
   return (
     <div className="shell">
       <Grain />
-      <TopNav view={view} onNavigate={navigate} counts={counts} onAdd={() => setFormOpen(true)} />
+      <TopNav view={view} onNavigate={navigate} counts={counts} onAdd={() => { setScanned(undefined); setFormOpen(true) }} onScan={openScan} />
 
       <main className={cx('content', view === 'home' && 'content-home')} key={view}>
         {view === 'home' && <Home state={state} now={now} onAdd={() => setFormOpen(true)} onOpen={openFile} onNavigate={navigate} />}
-        {view === 'board' && <RescueBoard state={state} now={now} onAdd={() => setFormOpen(true)} onOpen={openFile} />}
+        {view === 'board' && <RescueBoard state={state} now={now} onAdd={() => { setScanned(undefined); setFormOpen(true) }} onScan={openScan} onOpen={openFile} />}
         {view === 'map' && <MapView state={state} now={now} onOpen={openFile} />}
         {view === 'ngos' && <NgoNetwork state={state} now={now} />}
         {view === 'dispatch' && <Dispatch state={state} now={now} store={store} toast={toast} onOpen={openFile} />}
@@ -187,15 +214,40 @@ export default function App() {
         ))}
       </nav>
 
+      {scanOpen && (
+        <FoodScan
+          onClose={() => setScanOpen(false)}
+          onResult={(r) => {
+            setScanned(r)
+            setScanOpen(false)
+            setFormOpen(true)
+          }}
+        />
+      )}
+
       {formOpen && (
         <DonationForm
+          key={scanned ? (scanned.kind === 'scan' ? scanned.meta.at : 'noscan') : 'manual'}
           state={state}
           now={now}
-          onClose={() => setFormOpen(false)}
-          onSubmit={(input) => {
-            const created = store.addDonation(input)
+          scanned={scanned}
+          onRescan={openScan}
+          onClose={() => {
             setFormOpen(false)
-            toast(t('“{name}” is on the board. Here are its matches.', { name: created.name }))
+            setScanned(undefined)
+          }}
+          onSubmit={(input, extras) => {
+            const created = store.addDonation(input, extras)
+            setFormOpen(false)
+            setScanned(undefined)
+            if (!extras?.screening) {
+              // Original manual flow, unchanged: open the file and let the coordinator pick.
+              toast(t('“{name}” is on the board. Here are its matches.', { name: created.name }))
+            } else if (created.status === 'In review') {
+              toast(t('“{name}” is waiting for a human check before matching.', { name: created.name }), 'info')
+            } else {
+              autoMatch(created, { ...state, donations: [created, ...state.donations] })
+            }
             setOpenId(created.id)
           }}
         />
@@ -210,6 +262,11 @@ export default function App() {
           toast={toast}
           onClose={() => setOpenId(null)}
           onOpenImpact={() => navigate('impact')}
+          onApprove={(d) => {
+            store.approveReview(d.id)
+            const approved: Donation = { ...d, status: 'Available' }
+            autoMatch(approved, { ...state, donations: state.donations.map((x) => (x.id === d.id ? approved : x)) })
+          }}
         />
       )}
 

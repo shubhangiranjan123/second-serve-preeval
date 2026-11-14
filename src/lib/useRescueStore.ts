@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { AppState, Category, Diet, Donation, StorageType } from '../types'
+import type { AppState, Category, Diet, Donation, Packaging, Screening, StorageType } from '../types'
 import { createInitialState, findArea } from '../data/demoData'
 import { MIN, estimateWeightKg } from './engine'
 
@@ -20,6 +20,14 @@ export type NewDonationInput = {
   prepMinutes: number
   travelEstimate: number
   safeHours: number
+}
+
+// Extra fields from the AI Food Scan flow (Engine 1). All optional, so the
+// existing manual listing form keeps working exactly as before.
+export type ScreenedExtras = {
+  preparedAt?: number
+  packaging?: Packaging
+  screening?: Screening
 }
 
 function isState(value: unknown): value is AppState {
@@ -75,8 +83,9 @@ export function useRescueStore() {
   }, [state])
 
   const addDonation = useCallback(
-    (input: NewDonationInput): Donation => {
+    (input: NewDonationInput, extras: ScreenedExtras = {}): Donation => {
       const now = Date.now()
+      const held = extras.screening?.outcome === 'review'
       const area = findArea(input.area)
       const { safeHours, ...fields } = input
       const created: Donation = {
@@ -87,11 +96,20 @@ export function useRescueStore() {
         createdAt: now,
         readyAt: now + input.prepMinutes * MIN,
         safeUntil: now + Math.round(safeHours * 60) * MIN,
-        status: 'Available',
+        status: held ? 'In review' : 'Available',
         ngoId: null,
         runnerId: null,
         stage: 'Pending',
-        timeline: [{ key: 'created', at: now, note: `Listed by ${input.donor}` }],
+        timeline: [
+          {
+            key: 'created',
+            at: now,
+            note: extras.screening
+              ? `Listed by ${input.donor} · AI-screened${held ? ', held for review' : ''}`
+              : `Listed by ${input.donor}`,
+          },
+        ],
+        ...extras,
       }
       setState((s) => ({ ...s, donations: [created, ...s.donations] }))
       return created
@@ -120,6 +138,25 @@ export function useRescueStore() {
         ),
       }
     })
+  }, [])
+
+  // Manual review (Engine 1 → human). Only a coordinator's approval moves an
+  // 'In review' listing onto the board where matching can see it.
+  const approveReview = useCallback((donationId: number, note?: string) => {
+    setState((s) => ({
+      ...s,
+      donations: s.donations.map((d) =>
+        d.id === donationId && d.status === 'In review'
+          ? {
+              ...d,
+              status: 'Available',
+              screening: d.screening
+                ? { ...d.screening, review: { decision: 'approved', at: Date.now(), by: 'Coordinator', note } }
+                : d.screening,
+            }
+          : d,
+      ),
+    }))
   }, [])
 
   const releaseMatch = useCallback((donationId: number) => {
@@ -225,7 +262,7 @@ export function useRescueStore() {
   const withdraw = useCallback((donationId: number) => {
     setState((s) => ({
       ...s,
-      donations: s.donations.filter((d) => !(d.id === donationId && d.status === 'Available')),
+      donations: s.donations.filter((d) => !(d.id === donationId && (d.status === 'Available' || d.status === 'In review'))),
     }))
   }, [])
 
@@ -240,7 +277,7 @@ export function useRescueStore() {
     setState(createInitialState(Date.now()))
   }, [])
 
-  return { state, addDonation, reserve, releaseMatch, assignRunner, advance, withdraw, toggleShift, reset }
+  return { state, addDonation, approveReview, reserve, releaseMatch, assignRunner, advance, withdraw, toggleShift, reset }
 }
 
 export type RescueStore = ReturnType<typeof useRescueStore>
