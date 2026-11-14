@@ -3,7 +3,7 @@ import type { AppState, Category, Diet, Donation, StorageType } from '../types'
 import { createInitialState, findArea } from '../data/demoData'
 import { MIN, estimateWeightKg } from './engine'
 
-export const STORAGE_KEY = 'second-serve-preeval-v1'
+export const STORAGE_KEY = 'second-serve-preeval-v2'
 
 export type NewDonationInput = {
   name: string

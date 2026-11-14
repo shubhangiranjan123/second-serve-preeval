@@ -97,7 +97,15 @@ second-serve-preeval/
 | **NGO network** | Verification state, opening hours with an open-now flag, fridge and freezer, veg-only flag, stated needs, and today's capacity split into delivered and reserved. |
 | **Runner dispatch** | Runner cards with an on-shift toggle and current run, plus Pending → Assigned → Picked up → Delivered lanes with one-click actions. |
 | **Impact report** | Meals rescued, kg rescued (estimated waste avoided), deliveries, organisations served, estimated CO₂e, a 7-day bar chart with hover detail, a category breakdown, a rescue log and the stated assumptions. |
-| **Persistence** | Everything is saved to localStorage key `second-serve-preeval-v1`. A refresh keeps your data. A reset restores the demo. |
+| **Rescue garden** | One flower blooms for every delivered rescue: the stem draws itself, leaves pop, the head opens with a chime. Species by food type: **dahlia** = cooked meals, **sunflower** = bakery, **tulip** = produce, **lotus** = dry rations. Bigger rescues grow bigger flowers. Hover a flower for its story. Food that expires falls as a **grey petal**. Milestones unlock with petal confetti: **lantern tree** (5), **fireflies** (10), **moon pond** (15), **aurora sky** (20). **Garden postcard** exports a shareable PNG. Lives on Home, Impact, the Live map and the Room wall. |
+| **Live map** | An illustrated, offline SVG map of Chandigarh (`#map`): countdown-ring pins for open listings, partner houses with sprouts for today's rescues, runners, dashed routes for matched food and a glowing **firefly** for food in transit. |
+| **Replay the day** | One click replays the last 24 hours in 15 seconds: pins pop, fireflies fly each route, partner houses burst, and the garden below grows in sync with a clock. |
+| **Kitchen compatibility** | Every partner now has real storage units (fridge L, freezer L, dry store kg), meal times, reheating and a Jain-separated kitchen flag. Matching adds a 7th gate (enough free space in the right unit) and a 0–100 **compatibility score** from 6 factors (storage room, cold chain, diet fit, asked for it, meal timing, can reheat) shown as a **radar chart** plus a fridge/freezer gauge showing space before and after this donation. Compatibility is 30% of the match score. |
+| **Wilting bud** | Every listing carries a bud that droops and fades as its safe window runs out, blooms when delivered, and turns grey when it expires. |
+| **Rescue streaks** | Consecutive days each donor's food was actually delivered, with a 7-day strip on Home and a 🔥 chip on their listings. |
+| **Hindi / Punjabi** | EN · हि · ਪੰ toggle in the top bar (and on the Room wall). Interface text switches; fonts are bundled so it works offline. |
+| **Delight** | Cursor glow trail, petal confetti on deliveries and milestones, soft bloom chimes (mute toggle on the garden; tap the Room wall once to allow sound). |
+| **Persistence** | Everything is saved to localStorage key `second-serve-preeval-v2`. A refresh keeps your data. A reset restores the demo. |
 
 ---
 
@@ -206,14 +214,16 @@ Chandigarh, with approximate sector coordinates.
 
 **0:45 · List food.** Click **List surplus food**, then **Fill sample**. Drag the safe-window slider to show the verdict flipping between Feasible, At risk and Not feasible, then set it back to 3 hours. Point at the safe-handling checklist. Click **List & find matches**.
 
-**1:10 · Matching.** "Six safety gates first, then a transparent 0–100 score. Haven is out because it has no fridge. Roti Bank is out because it isn't verified yet. No black box." Click **Reserve**.
+**1:10 · Matching.** "Seven safety gates first, then a kitchen-compatibility radar: is there fridge space, does their kitchen fit the diet, do they serve a meal before the food expires? Haven is out because it has no fridge. Roti Bank is out because it isn't verified yet. No black box." Point at the radar and the fridge gauge, then click **Reserve**.
 
 **1:30 · Dispatch.** "Nearest free runner. Meera is busy, so it suggests Aarav." Click **Assign**, then **Mark picked up**, then **Mark delivered**.
-Now point at the projector: the **RESCUED** stamp lands and the room wall jumps by 35.
+Now point at the projector: the **RESCUED** stamp lands, the counter jumps, a dahlia draws itself into the garden, and the **moon pond** milestone unlocks with confetti (the demo data sits at 14 rescues, so your first live delivery is #15).
 
 **2:00 · Receipt.** Scroll down in the drawer and click **Download receipt**. "Every meal saved gets a receipt you can share. It's counted once, only on delivery, and the waste and CO₂ figures are clearly labelled estimates."
 
-**2:20 · Close.** "That's feasibility, matching, dispatch, traceability and honest impact, working end to end. Next is a real-time backend so donors can list from their phones, and the live route map."
+**2:10 · Map replay.** Open **Live map**, press **Replay last 24 hours**. "This is today in 15 seconds: every firefly is a meal crossing the city, and every flower is one that got eaten instead of binned."
+
+**2:30 · Close.** Flip the language toggle to हि or ਪੰ for a second. "Built for the dhaba owner and the shelter cook, not just us. Next: real-time phone listing and WhatsApp."
 
 **Backup:** keep a screen recording of this exact run.
 
@@ -232,13 +242,14 @@ Now point at the projector: the **RESCUED** stamp lands and the room wall jumps 
 ## 9. What's reserved for the full SECOND-SERVE build
 
 **Already in the full project, left out here to keep the demo tight:**
-- Rescue map with routing (Leaflet).
+- Street-tile map with routing (Leaflet). This build uses its own illustrated offline map instead.
 - NGO network management: verify, reject or revoke organisations, edit daily capacity, pause intake, register new organisations.
 - Rescue Intelligence tools: Rescue Cascade and Surplus Forecast.
 
 **Planned for the full build (not in either version yet):**
 - A real-time shared backend, so a donor can list from their phone via an on-screen QR code.
 - AI photo-to-form listing, or listing over WhatsApp.
-- An animated route on the map and a large live "meals rescued" counter.
 - NGO accept/decline with automatic fallback to the next match.
 - QR-verified handover at delivery.
+- Multi-pickup route batching for one runner.
+- Surplus forecasting per donor and day of week.

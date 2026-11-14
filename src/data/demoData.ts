@@ -18,6 +18,17 @@ export const AREAS: Area[] = [
   { name: 'Manimajra', lat: 30.718, lng: 76.835 },
 ]
 
+export const DONOR_AREAS: Record<string, string> = {
+  'The Green Kitchen': 'Sector 35',
+  'Sunday Bakehouse': 'Sector 34',
+  'Daily Grind Café': 'Sector 36',
+  'Rasoi Banquet Hall': 'Sector 8',
+  'Harvest Market': 'Sector 22',
+  'Hearth & Tandoor': 'Sector 17',
+  'Punjabi Rasoi': 'Sector 26',
+  'Gupta Provision Store': 'Sector 15',
+}
+
 export function findArea(name: string): Area {
   return AREAS.find((a) => a.name === name) ?? AREAS[2]
 }
@@ -80,6 +91,13 @@ export function createInitialNgos(): Ngo[] {
       accepting: true,
       opensHour: 7,
       closesHour: 23,
+      fridgeLitres: 160,
+      freezerLitres: 0,
+      dryStoreKg: 120,
+      canReheat: true,
+      jainKitchen: false,
+      mealHours: [8, 13, 20],
+      prefers: ['Meals', 'Produce', 'Dry rations'],
     },
     {
       id: 102,
@@ -95,6 +113,13 @@ export function createInitialNgos(): Ngo[] {
       accepting: true,
       opensHour: 0,
       closesHour: 24,
+      fridgeLitres: 0,
+      freezerLitres: 0,
+      dryStoreKg: 60,
+      canReheat: false,
+      jainKitchen: false,
+      mealHours: [7, 19],
+      prefers: ['Meals', 'Bakery', 'Produce'],
     },
     {
       id: 103,
@@ -110,6 +135,13 @@ export function createInitialNgos(): Ngo[] {
       accepting: true,
       opensHour: 7,
       closesHour: 21,
+      fridgeLitres: 120,
+      freezerLitres: 60,
+      dryStoreKg: 80,
+      canReheat: true,
+      jainKitchen: true,
+      mealHours: [8, 13, 17, 20],
+      prefers: ['Meals', 'Produce', 'Bakery'],
     },
     {
       id: 104,
@@ -125,6 +157,13 @@ export function createInitialNgos(): Ngo[] {
       accepting: true,
       opensHour: 9,
       closesHour: 21,
+      fridgeLitres: 200,
+      freezerLitres: 0,
+      dryStoreKg: 400,
+      canReheat: false,
+      jainKitchen: false,
+      mealHours: [12, 19],
+      prefers: ['Dry rations', 'Bakery', 'Meals'],
     },
   ]
 }
@@ -317,8 +356,17 @@ function createSeedHistory(now: number, donations: Donation[]): RescueRecord[] {
     [5, 'Bread loaves', 'Sunday Bakehouse', 'Bakery', 18, 'Haven Night Shelter', 'Aarav Sharma', 102],
     [4, 'Bananas & papaya', 'Harvest Market', 'Produce', 22, "Saathi Children's Home", 'Kabir Singh', 103],
     [3, 'Veg thali boxes', 'The Green Kitchen', 'Meals', 34, 'Annapurna Community Kitchen', 'Meera Kapoor', 101],
+    [3, 'Sandwich trays', 'Daily Grind Café', 'Meals', 12, 'Haven Night Shelter', 'Aarav Sharma', 102],
     [2, 'Poha & upma trays', 'Daily Grind Café', 'Meals', 16, "Saathi Children's Home", 'Aarav Sharma', 103],
     [1, 'Atta & chana (dry)', 'Gupta Provision Store', 'Dry rations', 40, 'Haven Night Shelter', 'Kabir Singh', 102],
+    [1, 'Croissants & muffins', 'Daily Grind Café', 'Bakery', 14, 'Haven Night Shelter', 'Meera Kapoor', 102],
+    [1, 'Pav & rusk', 'Sunday Bakehouse', 'Bakery', 20, 'Annapurna Community Kitchen', 'Aarav Sharma', 101],
+  ]
+  const todays: Array<[number, string, string, Category, number, string, string, number]> = [
+    [9.5, 'Masala oats cups', 'Daily Grind Café', 'Meals', 14, "Saathi Children's Home", 'Meera Kapoor', 103],
+    [7, 'Multigrain loaves', 'Sunday Bakehouse', 'Bakery', 12, 'Haven Night Shelter', 'Aarav Sharma', 102],
+    [5, 'Guava & oranges', 'Harvest Market', 'Produce', 18, "Saathi Children's Home", 'Kabir Singh', 103],
+    [3.6, 'Khichdi pots', 'The Green Kitchen', 'Meals', 28, 'Annapurna Community Kitchen', 'Meera Kapoor', 101],
   ]
   const records: RescueRecord[] = past.map(([daysAgo, food, donor, category, servings, ngoName, runnerName, ngoId], i) => ({
     donationId: -(i + 1),
@@ -333,6 +381,21 @@ function createSeedHistory(now: number, donations: Donation[]): RescueRecord[] {
     deliveredAt: now - daysAgo * day - 2 * H,
     seeded: true,
   }))
+  todays.forEach(([hoursAgo, food, donor, category, servings, ngoName, runnerName, ngoId], i) => {
+    records.push({
+      donationId: -(100 + i),
+      food,
+      donor,
+      category,
+      ngoId,
+      ngoName,
+      runnerName,
+      servings,
+      weightKg: estimateWeightKg({ unit: 'servings', quantity: servings, servings }),
+      deliveredAt: now - hoursAgo * H,
+      seeded: true,
+    })
+  })
 
   const rajma = donations.find((d) => d.id === 6)
   if (rajma) {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { AlertTriangle, CheckCircle2, XCircle } from 'lucide-react'
 import type { Verdict } from '../lib/engine'
 import type { DispatchStage, DonationStatus } from '../types'
+import { useT } from '../lib/i18n'
 
 export function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(' ')
@@ -40,19 +41,21 @@ const verdictIcon: Record<Verdict, ReactNode> = {
 }
 
 export function VerdictPill({ verdict, large }: { verdict: Verdict; large?: boolean }) {
+  const { t } = useT()
   const tone = verdict === 'Feasible' ? 'ok' : verdict === 'At risk' ? 'warn' : 'bad'
   return (
     <span className={cx('verdict', `verdict-${tone}`, large && 'verdict-lg')}>
       {verdictIcon[verdict]}
-      {verdict}
+      {t(verdict)}
     </span>
   )
 }
 
 export function StatusPill({ status, stage }: { status: DonationStatus; stage: DispatchStage }) {
-  if (status === 'Available') return <span className="status status-available">Available</span>
-  if (status === 'Delivered') return <span className="status status-delivered">Delivered</span>
-  const label = stage === 'Pending' ? 'Matched · awaiting runner' : stage
+  const { t } = useT()
+  if (status === 'Available') return <span className="status status-available">{t('Available')}</span>
+  if (status === 'Delivered') return <span className="status status-delivered">{t('Delivered')}</span>
+  const label = stage === 'Pending' ? t('Matched · awaiting runner') : t(stage)
   return <span className="status status-reserved">{label}</span>
 }
 
@@ -87,6 +90,7 @@ export function Eyebrow({ children }: { children: ReactNode }) {
   )
 }
 
-export function DemoBadge({ children = 'Demonstration data' }: { children?: ReactNode }) {
-  return <span className="demo-badge">{children}</span>
+export function DemoBadge({ children }: { children?: ReactNode }) {
+  const { t } = useT()
+  return <span className="demo-badge">{children ?? t('Demonstration data')}</span>
 }

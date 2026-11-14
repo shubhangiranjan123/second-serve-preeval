@@ -6,6 +6,7 @@ import { MIN, assessFeasibility, matchNgos } from '../lib/engine'
 import type { NewDonationInput } from '../lib/useRescueStore'
 import { FeasibilityMeter } from './FeasibilityMeter'
 import { cx } from './ui'
+import { useT } from '../lib/i18n'
 
 type FormState = {
   name: string
@@ -76,6 +77,7 @@ function Segmented<T extends string>({
   onChange: (v: T) => void
   name: string
 }) {
+  const { t } = useT()
   return (
     <div className="segmented" role="radiogroup" aria-label={name}>
       {options.map((o) => (
@@ -87,7 +89,7 @@ function Segmented<T extends string>({
           className={cx(value === o && 'on')}
           onClick={() => onChange(o)}
         >
-          {o}
+          {t(o)}
         </button>
       ))}
     </div>
@@ -105,6 +107,7 @@ export function DonationForm({
   onClose: () => void
   onSubmit: (input: NewDonationInput) => void
 }) {
+  const { t } = useT()
   const [f, setF] = useState<FormState>(EMPTY)
   const [checks, setChecks] = useState<boolean[]>(CHECKLIST.map(() => false))
   const [touched, setTouched] = useState(false)
@@ -219,9 +222,9 @@ export function DonationForm({
       >
         <header className="modal-head">
           <div>
-            <span className="drawer-kicker">New listing</span>
+            <span className="drawer-kicker">{t('New listing')}</span>
             <h2>
-              List surplus <em>food</em>
+              {t('List surplus')} <em>{t('food')}</em>
             </h2>
           </div>
           <div className="modal-head-actions">
@@ -233,7 +236,7 @@ export function DonationForm({
                 setChecks(CHECKLIST.map(() => true))
               }}
             >
-              <Wand2 size={14} /> Fill sample
+              <Wand2 size={14} /> {t('Fill sample')}
             </button>
             <button type="button" className="icon-btn" onClick={onClose} aria-label="Close">
               <X size={20} />
@@ -244,28 +247,28 @@ export function DonationForm({
         <div className="form-grid">
           <div className="form-fields">
             <fieldset>
-              <legend>What is it?</legend>
+              <legend>{t('What is it?')}</legend>
               <label className="field span-2">
-                <span>Food name</span>
+                <span>{t('Food name')}</span>
                 <input value={f.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. Veg pulao & dal tadka" />
                 {err('name')}
               </label>
               <label className="field span-2">
-                <span>Donor / restaurant</span>
+                <span>{t('Donor / restaurant')}</span>
                 <input value={f.donor} onChange={(e) => set('donor', e.target.value)} placeholder="e.g. The Green Kitchen" />
                 {err('donor')}
               </label>
               <div className="field span-2">
-                <span>Category</span>
+                <span>{t('Category')}</span>
                 <Segmented name="Category" value={f.category} options={CATEGORIES} onChange={changeCategory} />
               </div>
               <label className="field">
-                <span>Servings</span>
+                <span>{t('Servings')}</span>
                 <input inputMode="numeric" value={f.servings} onChange={(e) => set('servings', e.target.value)} />
                 {err('servings')}
               </label>
               <label className="field">
-                <span>Quantity</span>
+                <span>{t('Quantity')}</span>
                 <div className="input-suffix">
                   <input inputMode="decimal" value={f.quantity} onChange={(e) => set('quantity', e.target.value)} />
                   <select value={f.unit} onChange={(e) => set('unit', e.target.value)} aria-label="Unit">
@@ -277,31 +280,31 @@ export function DonationForm({
                 {err('quantity')}
               </label>
               <div className="field">
-                <span>Dietary</span>
+                <span>{t('Dietary')}</span>
                 <Segmented name="Dietary" value={f.diet} options={['Veg', 'Jain', 'Non-veg'] as const} onChange={(v) => set('diet', v)} />
               </div>
               <div className="field">
-                <span>Storage</span>
+                <span>{t('Storage')}</span>
                 <Segmented name="Storage" value={f.storage} options={['Ambient', 'Chilled', 'Frozen'] as const} onChange={(v) => set('storage', v)} />
               </div>
             </fieldset>
 
             <fieldset>
-              <legend>Timing</legend>
+              <legend>{t('Timing')}</legend>
               <label className="field">
-                <span>Preparation time</span>
+                <span>{t('Preparation time')}</span>
                 <div className="input-suffix"><input inputMode="numeric" value={f.prepMinutes} onChange={(e) => set('prepMinutes', e.target.value)} /><em>min</em></div>
-                <small>Time to pack and hand over</small>
+                <small>{t('Time to pack and hand over')}</small>
                 {err('prepMinutes')}
               </label>
               <label className="field">
-                <span>Travel time estimate</span>
+                <span>{t('Travel time estimate')}</span>
                 <div className="input-suffix"><input inputMode="numeric" value={f.travelEstimate} onChange={(e) => set('travelEstimate', e.target.value)} /><em>min</em></div>
-                <small>Your best guess</small>
+                <small>{t('Your best guess')}</small>
                 {err('travelEstimate')}
               </label>
               <label className="field span-2">
-                <span>Safe-consumption window</span>
+                <span>{t('Safe-consumption window')}</span>
                 <div className="range-row">
                   <input
                     type="range"
@@ -314,15 +317,15 @@ export function DonationForm({
                   />
                   <div className="input-suffix narrow"><input inputMode="decimal" value={f.safeHours} onChange={(e) => set('safeHours', e.target.value)} /><em>h</em></div>
                 </div>
-                <small>How long from now the food stays safe to eat, in your judgement</small>
+                <small>{t('How long from now the food stays safe to eat, in your judgement')}</small>
                 {err('safeHours')}
               </label>
             </fieldset>
 
             <fieldset>
-              <legend>Pickup</legend>
+              <legend>{t('Pickup')}</legend>
               <label className="field">
-                <span>Area</span>
+                <span>{t('Area')}</span>
                 <select value={f.area} onChange={(e) => set('area', e.target.value)}>
                   {AREAS.map((a) => (
                     <option key={a.name}>{a.name}</option>
@@ -330,18 +333,18 @@ export function DonationForm({
                 </select>
               </label>
               <label className="field">
-                <span>Pickup point</span>
+                <span>{t('Pickup point')}</span>
                 <input value={f.address} onChange={(e) => set('address', e.target.value)} placeholder="Shop / gate / landmark" />
                 {err('address')}
               </label>
               <label className="field span-2">
-                <span>Description</span>
+                <span>{t('Description')}</span>
                 <textarea rows={2} value={f.description} onChange={(e) => set('description', e.target.value)} placeholder="When was it cooked? How is it packed? Any allergens?" />
               </label>
             </fieldset>
 
             <fieldset className="checklist">
-              <legend>Safe-handling checklist</legend>
+              <legend>{t('Safe-handling checklist')}</legend>
               {CHECKLIST.map((c, i) => (
                 <label key={c} className={cx('check', checks[i] && 'check-on')}>
                   <input
@@ -350,7 +353,7 @@ export function DonationForm({
                     onChange={() => setChecks((p) => p.map((v, j) => (j === i ? !v : v)))}
                   />
                   <span className="check-box"><Check size={13} strokeWidth={3} /></span>
-                  {c}
+                  {t(c)}
                 </label>
               ))}
               {err('checks')}
@@ -359,7 +362,7 @@ export function DonationForm({
 
           <aside className="form-preview">
             <div className="preview-sticky">
-              <span className="preview-label">Live feasibility check</span>
+              <span className="preview-label">{t('Live feasibility check')}</span>
               {preview ? (
                 <>
                   <FeasibilityMeter f={preview.feas} compact />
@@ -370,25 +373,25 @@ export function DonationForm({
                       {preview.eligible === 1 ? 'organisation passes' : 'organisations pass'} every matching gate
                       {preview.best && (
                         <>
-                          <br />Likely best match: <b>{preview.best}</b>
+                          <br />{t('Likely best match:')} <b>{preview.best}</b>
                         </>
                       )}
                     </span>
                   </div>
                 </>
               ) : (
-                <p className="preview-explain">Fill in timing to see whether this rescue can make it in time.</p>
+                <p className="preview-explain">{t('Fill in timing to see whether this rescue can make it in time.')}</p>
               )}
-              <p className="feas-disclaimer">Screening aid only — not a food-safety certification.</p>
+              <p className="feas-disclaimer">{t('Screening aid only — not a food-safety certification.')}</p>
             </div>
           </aside>
         </div>
 
         <footer className="modal-foot">
-          <span className="foot-hint">{touched && !valid ? 'A few details still need attention.' : 'Listings are saved in this browser.'}</span>
-          <button type="button" className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <span className="foot-hint">{touched && !valid ? t('A few details still need attention.') : t('Listings are saved in this browser.')}</span>
+          <button type="button" className="btn btn-ghost" onClick={onClose}>{t('Cancel')}</button>
           <button type="submit" className="btn btn-primary" disabled={busy}>
-            {busy ? <><Loader2 size={16} className="spin" /> Listing…</> : 'List & find matches'}
+            {busy ? <><Loader2 size={16} className="spin" /> {t('Listing…')}</> : t('List & find matches')}
           </button>
         </footer>
       </form>

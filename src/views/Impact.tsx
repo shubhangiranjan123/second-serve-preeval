@@ -4,6 +4,8 @@ import type { AppState, Category } from '../types'
 import { IMPACT, formatClock, impactTotals, sameLocalDay } from '../lib/engine'
 import { CATEGORIES } from '../data/demoData'
 import { CountUp, Eyebrow } from '../components/ui'
+import { Garden } from '../components/Garden'
+import { useT } from '../lib/i18n'
 
 const DAY = 24 * 60 * 60 * 1000
 
@@ -71,7 +73,9 @@ function WeekChart({ state, now }: { state: AppState; now: number }) {
 }
 
 export function Impact({ state, now }: { state: AppState; now: number }) {
+  const { t: tr } = useT()
   const t = impactTotals(state.history)
+  const wilted = state.donations.filter((d) => d.status === 'Available' && d.safeUntil <= now)
   const orgs = new Set(state.history.map((r) => r.ngoId)).size
   const seeded = state.history.filter((r) => r.seeded).length
   const live = state.history.length - seeded
@@ -86,61 +90,62 @@ export function Impact({ state, now }: { state: AppState; now: number }) {
     <div className="view">
       <header className="view-head">
         <div>
-          <Eyebrow>Impact report</Eyebrow>
+          <Eyebrow>{tr('Impact report')}</Eyebrow>
           <h1>
-            Measured on <em>delivery,</em> not on listing.
+            {tr('Measured on')} <em>{tr('delivery,')}</em> {tr('not on listing.')}
           </h1>
           <p className="view-lede">
-            A rescue only counts once a runner marks it delivered. Each record is written once, keyed to its donation,
-            so nothing is ever double counted.
+            {tr('A rescue only counts once a runner marks it delivered. Each record is written once, keyed to its donation, so nothing is ever double counted.')}
           </p>
         </div>
-        <span className="sdg-tag"><Leaf size={14} /> Supports SDG 13 · Climate Action</span>
+        <span className="sdg-tag"><Leaf size={14} /> {tr('Supports SDG 13 · Climate Action')}</span>
       </header>
 
       <section className="impact-hero">
         <div className="impact-big">
-          <span>Meals rescued</span>
+          <span>{tr('Meals rescued')}</span>
           <strong><CountUp value={t.meals} /></strong>
-          <em>servings delivered to partner organisations</em>
+          <em>{tr('servings delivered to partner organisations')}</em>
         </div>
         <div className="impact-grid">
           <div>
-            <span>Food rescued · waste avoided <sup>est.</sup></span>
+            <span>{tr('Food rescued · waste avoided')} <sup>est.</sup></span>
             <strong><CountUp value={t.kg} decimals={1} /> <small>kg</small></strong>
           </div>
           <div>
-            <span>Successful deliveries</span>
+            <span>{tr('Successful deliveries')}</span>
             <strong><CountUp value={t.deliveries} /></strong>
           </div>
           <div>
-            <span>Organisations served</span>
+            <span>{tr('Organisations served')}</span>
             <strong><CountUp value={orgs} /></strong>
           </div>
           <div className="impact-co2">
-            <span>Emissions avoided <sup>est.</sup></span>
+            <span>{tr('Emissions avoided')} <sup>est.</sup></span>
             <strong>≈ <CountUp value={t.co2e} /> <small>kg CO₂e</small></strong>
           </div>
         </div>
       </section>
 
+      <Garden history={state.history} wilted={wilted} now={now} />
+
       <section className="split">
         <div className="panel">
           <div className="panel-head">
-            <h2>Meals rescued, last 7 days</h2>
-            <span className="panel-sub">Hover a day for detail</span>
+            <h2>{tr('Meals rescued, last 7 days')}</h2>
+            <span className="panel-sub">{tr('Hover a day for detail')}</span>
           </div>
           <WeekChart state={state} now={now} />
         </div>
         <div className="panel">
           <div className="panel-head">
-            <h2>Food rescued by category</h2>
-            <span className="panel-sub">kilograms, estimated</span>
+            <h2>{tr('Food rescued by category')}</h2>
+            <span className="panel-sub">{tr('kilograms, estimated')}</span>
           </div>
           <ul className="hbars">
             {byCat.map((b) => (
               <li key={b.c}>
-                <span>{b.c}</span>
+                <span>{tr(b.c)}</span>
                 <div><i style={{ width: `${(b.kg / maxKg) * 100}%` }} /></div>
                 <strong>{b.kg} kg</strong>
               </li>
@@ -160,15 +165,15 @@ export function Impact({ state, now }: { state: AppState; now: number }) {
 
       <section className="panel">
         <div className="panel-head">
-          <h2>Rescue log</h2>
+          <h2>{tr('Rescue log')}</h2>
           <span className="panel-sub">
-            {live} completed in this browser · {seeded} pre-loaded demonstration records
+            {tr('{a} completed in this browser · {b} pre-loaded demonstration records', { a: live, b: seeded })}
           </span>
         </div>
         <div className="table-wrap">
           <table className="log">
             <thead>
-              <tr><th>Food</th><th>From</th><th>To</th><th>Runner</th><th className="num">Servings</th><th>Delivered</th></tr>
+              <tr><th>{tr('Food')}</th><th>{tr('From')}</th><th>{tr('To')}</th><th>{tr('Runner')}</th><th className="num">{tr('Servings')}</th><th>{tr('Delivered')}</th></tr>
             </thead>
             <tbody>
               {log.map((r) => (

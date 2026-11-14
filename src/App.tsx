@@ -13,9 +13,15 @@ import { NgoNetwork } from './views/NgoNetwork'
 import { Dispatch } from './views/Dispatch'
 import { Impact } from './views/Impact'
 import { Live } from './views/Live'
+import { MapView } from './views/MapView'
+import { Confetti, burstConfetti } from './components/Confetti'
+import { CursorGlow } from './components/CursorGlow'
+import { chime } from './lib/sound'
+import { SPECIES, milestoneReached, MILESTONES } from './lib/garden'
+import { useT } from './lib/i18n'
 import type { RescueRecord } from './types'
 
-const VIEWS: View[] = ['home', 'board', 'ngos', 'dispatch', 'impact', 'live']
+const VIEWS: View[] = ['home', 'board', 'map', 'ngos', 'dispatch', 'impact', 'live']
 
 function readHash(): View {
   const h = window.location.hash.replace('#', '') as View
@@ -32,6 +38,7 @@ function useNow(intervalMs = 15_000) {
 }
 
 export default function App() {
+  const { t } = useT()
   const store = useRescueStore()
   const { state } = store
   const tickNow = useNow()
@@ -45,6 +52,7 @@ export default function App() {
   const [confirmReset, setConfirmReset] = useState(false)
   const [toasts, setToasts] = useState<Toast[]>([])
   const [celebrate, setCelebrate] = useState<RescueRecord | null>(null)
+  const [milestone, setMilestone] = useState<(typeof MILESTONES)[number] | null>(null)
   const toastId = useRef(0)
   const historyCount = useRef(state.history.length)
 
@@ -52,10 +60,23 @@ export default function App() {
   useEffect(() => {
     if (state.history.length > historyCount.current) {
       const latest = [...state.history].sort((a, b) => b.deliveredAt - a.deliveredAt)[0]
+      const reached = milestoneReached(historyCount.current, state.history.length)
       setCelebrate(latest ?? null)
-      const t = setTimeout(() => setCelebrate(null), 2600)
+      chime('bloom')
+      burstConfetti(0.6)
+      const timers = [setTimeout(() => setCelebrate(null), 2600)]
+      if (reached) {
+        timers.push(
+          setTimeout(() => {
+            setMilestone(reached)
+            chime('milestone')
+            burstConfetti(1.6)
+          }, 2700),
+          setTimeout(() => setMilestone(null), 7200),
+        )
+      }
       historyCount.current = state.history.length
-      return () => clearTimeout(t)
+      return () => timers.forEach(clearTimeout)
     }
     historyCount.current = state.history.length
   }, [state.history])
@@ -99,13 +120,29 @@ export default function App() {
         <Drop key={i} className={`burst burst-${i}`} size={22 + (i % 4) * 8} />
       ))}
       <div className="celebrate-card">
-        <span className="stamp-big">RESCUED</span>
-        <strong>{celebrate.servings} meals</strong>
+        <span className="stamp-big">{t('RESCUED')}</span>
+        <strong>{t('{n} meals', { n: celebrate.servings })}</strong>
         <span>
           {celebrate.food} → {celebrate.ngoName}
         </span>
+        <span>{t('A {flower} just bloomed in the garden', { flower: t(SPECIES[celebrate.category].name).toLowerCase() })}</span>
       </div>
     </div>
+  )
+
+  const milestoneBanner = milestone && (
+    <div className="live-milestone" role="status">
+      <span>{t('New in the garden')}</span>
+      <strong>{t(milestone.name)}</strong>
+      <em>{t(milestone.line)}</em>
+    </div>
+  )
+
+  const overlays = (
+    <>
+      <Confetti />
+      <CursorGlow />
+    </>
   )
 
   if (view === 'live') {
@@ -114,6 +151,8 @@ export default function App() {
         <Grain />
         <Live state={state} now={now} onExit={() => navigate('home')} />
         {celebration}
+        {milestoneBanner}
+        {overlays}
       </>
     )
   }
@@ -126,6 +165,7 @@ export default function App() {
       <main className={cx('content', view === 'home' && 'content-home')} key={view}>
         {view === 'home' && <Home state={state} now={now} onAdd={() => setFormOpen(true)} onOpen={openFile} onNavigate={navigate} />}
         {view === 'board' && <RescueBoard state={state} now={now} onAdd={() => setFormOpen(true)} onOpen={openFile} />}
+        {view === 'map' && <MapView state={state} now={now} onOpen={openFile} />}
         {view === 'ngos' && <NgoNetwork state={state} now={now} />}
         {view === 'dispatch' && <Dispatch state={state} now={now} store={store} toast={toast} onOpen={openFile} />}
         {view === 'impact' && <Impact state={state} now={now} />}
@@ -133,13 +173,12 @@ export default function App() {
 
       <footer className="footer">
         <Wordmark />
-        <span className="footer-tag">Good food. Better futures.</span>
+        <span className="footer-tag">{t('Good food. Better futures.')}</span>
         <span className="footer-note">
-          Pre-evaluation build · demonstration data (fictional NGOs, simulated runners) · feasibility is a screening aid,
-          not a food-safety certification · environmental figures are estimates · supports SDG 13.
+          {t('Pre-evaluation build · demonstration data (fictional NGOs, simulated runners) · feasibility is a screening aid, not a food-safety certification · environmental figures are estimates · supports SDG 13.')}
         </span>
         <button className="reset-link" onClick={() => setConfirmReset(true)}>
-          <RotateCcw size={13} /> Reset demo data
+          <RotateCcw size={13} /> {t('Reset demo data')}
         </button>
       </footer>
 
@@ -147,7 +186,7 @@ export default function App() {
         {NAV.map(({ id, short, Icon }) => (
           <button key={id} className={cx(view === id && 'on')} onClick={() => navigate(id)}>
             <Icon size={19} />
-            <span>{short}</span>
+            <span>{t(short)}</span>
           </button>
         ))}
       </nav>
@@ -160,7 +199,7 @@ export default function App() {
           onSubmit={(input) => {
             const created = store.addDonation(input)
             setFormOpen(false)
-            toast(`“${created.name}” is on the board. Here are its matches.`)
+            toast(t('“{name}” is on the board. Here are its matches.', { name: created.name }))
             setOpenId(created.id)
           }}
         />
@@ -181,11 +220,11 @@ export default function App() {
       {confirmReset && (
         <div className="modal-scrim" onClick={() => setConfirmReset(false)}>
           <div className="modal confirm" role="alertdialog" aria-modal="true" aria-label="Reset demo data" onClick={(e) => e.stopPropagation()}>
-            <h2>Reset demo data?</h2>
-            <p>This clears every listing, match and rescue you created in this browser and restores the sample city.</p>
+            <h2>{t('Reset demo data?')}</h2>
+            <p>{t('This clears every listing, match and rescue you created in this browser and restores the sample city.')}</p>
             <div className="confirm-actions">
               <button className="btn btn-outline-ink" onClick={() => setConfirmReset(false)}>
-                Keep my data
+                {t('Keep my data')}
               </button>
               <button
                 className="btn btn-ink"
@@ -193,11 +232,11 @@ export default function App() {
                   store.reset()
                   setConfirmReset(false)
                   setOpenId(null)
-                  toast('Demo data restored.', 'info')
+                  toast(t('Demo data restored.'), 'info')
                   navigate('home')
                 }}
               >
-                <RotateCcw size={15} /> Reset
+                <RotateCcw size={15} /> {t('Reset')}
               </button>
             </div>
           </div>
@@ -205,7 +244,9 @@ export default function App() {
       )}
 
       {celebration}
+      {milestoneBanner}
       <Toasts toasts={toasts} />
+      {overlays}
     </div>
   )
 }

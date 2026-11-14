@@ -66,6 +66,13 @@ export type Ngo = {
   accepting: boolean
   opensHour: number // 0-23
   closesHour: number // 1-24 (24 = midnight)
+  fridgeLitres: number
+  freezerLitres: number
+  dryStoreKg: number
+  canReheat: boolean
+  jainKitchen: boolean
+  mealHours: number[]
+  prefers: Category[]
 }
 
 export type Runner = {

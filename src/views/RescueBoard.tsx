@@ -5,6 +5,7 @@ import { CATEGORIES } from '../data/demoData'
 import { assessFeasibility } from '../lib/engine'
 import { DonationCard } from '../components/DonationCard'
 import { Eyebrow, cx } from '../components/ui'
+import { useT } from '../lib/i18n'
 
 type StatusFilter = 'All' | 'Available' | 'In rescue' | 'Delivered'
 
@@ -19,6 +20,7 @@ export function RescueBoard({
   onAdd: () => void
   onOpen: (d: Donation) => void
 }) {
+  const { t } = useT()
   const [cat, setCat] = useState<Category | 'All food'>('All food')
   const [status, setStatus] = useState<StatusFilter>('All')
   const [q, setQ] = useState('')
@@ -56,14 +58,14 @@ export function RescueBoard({
     <div className="view">
       <header className="view-head">
         <div>
-          <Eyebrow>The rescue board</Eyebrow>
+          <Eyebrow>{t('The rescue board')}</Eyebrow>
           <h1>
-            Surplus, <em>sorted by urgency.</em>
+            {t('Surplus,')} <em>{t('sorted by urgency.')}</em>
           </h1>
-          <p className="view-lede">Every listing carries a live safe-time countdown and a feasibility verdict. Most urgent first.</p>
+          <p className="view-lede">{t('Every listing carries a live safe-time countdown, a feasibility verdict and a bud that wilts as time runs out. Most urgent first.')}</p>
         </div>
         <button className="btn btn-primary btn-lg" onClick={onAdd}>
-          <Plus size={18} /> List surplus food
+          <Plus size={18} /> {t('List surplus food')}
         </button>
       </header>
 
@@ -71,7 +73,7 @@ export function RescueBoard({
         <div className="chips" role="group" aria-label="Category">
           {(['All food', ...CATEGORIES] as const).map((c) => (
             <button key={c} className={cx('chip', cat === c && 'on')} onClick={() => setCat(c)}>
-              {c}
+              {t(c)}
             </button>
           ))}
         </div>
@@ -79,22 +81,22 @@ export function RescueBoard({
           <div className="segmented small" role="group" aria-label="Status">
             {(['All', 'Available', 'In rescue', 'Delivered'] as const).map((s) => (
               <button key={s} className={cx(status === s && 'on')} onClick={() => setStatus(s)}>
-                {s} <em>{count(s)}</em>
+                {t(s)} <em>{count(s)}</em>
               </button>
             ))}
           </div>
           <label className="search">
             <Search size={15} />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search food, donor, area" aria-label="Search listings" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Search food, donor, area')} aria-label={t('Search food, donor, area')} />
           </label>
         </div>
       </div>
 
       {list.length === 0 ? (
         <div className="empty-board">
-          <p>No listings match these filters.</p>
+          <p>{t('No listings match these filters.')}</p>
           <button className="btn btn-ghost" onClick={() => { setCat('All food'); setStatus('All'); setQ('') }}>
-            Clear filters
+            {t('Clear filters')}
           </button>
         </div>
       ) : (

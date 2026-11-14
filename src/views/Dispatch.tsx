@@ -3,6 +3,7 @@ import type { AppState, DispatchStage, Donation } from '../types'
 import { formatClock, runnerOptions, sameLocalDay } from '../lib/engine'
 import type { RescueStore } from '../lib/useRescueStore'
 import { DemoBadge, Eyebrow, cx } from '../components/ui'
+import { useT } from '../lib/i18n'
 
 const LANES: Array<{ stage: DispatchStage; title: string; hint: string }> = [
   { stage: 'Pending', title: 'Pending', hint: 'Matched, needs a runner' },
@@ -24,6 +25,7 @@ export function Dispatch({
   toast: (msg: string, tone?: 'ok' | 'info' | 'warn') => void
   onOpen: (d: Donation) => void
 }) {
+  const { t } = useT()
   const jobs = state.donations.filter(
     (d) =>
       d.status === 'Reserved' ||
@@ -46,8 +48,8 @@ export function Dispatch({
           <span>{ngo?.name ?? '—'}</span>
         </div>
         <div className="job-meta">
-          <span>{d.servings} servings</span>
-          <span>safe until {formatClock(d.safeUntil)}</span>
+          <span>{t('{n} servings', { n: d.servings })}</span>
+          <span>{t('safe until {time}', { time: formatClock(d.safeUntil) })}</span>
         </div>
         {runner && (
           <div className="job-runner">
@@ -60,23 +62,23 @@ export function Dispatch({
               className="btn btn-dark btn-sm btn-block"
               onClick={() => {
                 store.assignRunner(d.id, suggestion.runner.id)
-                toast(`${suggestion.runner.name} assigned — ${suggestion.km.toFixed(1)} km from pickup.`)
+                toast(t('{name} assigned — {km} km from pickup.', { name: suggestion.runner.name, km: suggestion.km.toFixed(1) }))
               }}
             >
-              <Bike size={14} /> Assign {suggestion.runner.name.split(' ')[0]} (nearest)
+              <Bike size={14} /> {t('Assign {name} (nearest)', { name: suggestion.runner.name.split(' ')[0] })}
             </button>
           ) : (
-            <span className="job-wait">No runner free — bring someone on shift</span>
+            <span className="job-wait">{t('No runner free — bring someone on shift')}</span>
           ))}
         {d.stage === 'Assigned' && (
           <button
             className="btn btn-ghost btn-sm btn-block"
             onClick={() => {
               store.advance(d.id)
-              toast(`Picked up from ${d.donor}.`, 'info')
+              toast(t('Picked up from {donor}.', { donor: d.donor }), 'info')
             }}
           >
-            <Route size={14} /> Mark picked up
+            <Route size={14} /> {t('Mark picked up')}
           </button>
         )}
         {d.stage === 'Picked Up' && (
@@ -84,10 +86,10 @@ export function Dispatch({
             className="btn btn-primary btn-sm btn-block"
             onClick={() => {
               store.advance(d.id)
-              toast(`Delivered! ${d.servings} servings added to lifetime rescues.`)
+              toast(t('Delivered! {n} servings added to lifetime rescues.', { n: d.servings }))
             }}
           >
-            <PackageCheck size={14} /> Mark delivered
+            <PackageCheck size={14} /> {t('Mark delivered')}
           </button>
         )}
       </article>
@@ -98,16 +100,15 @@ export function Dispatch({
     <div className="view">
       <header className="view-head">
         <div>
-          <Eyebrow>Runner dispatch</Eyebrow>
+          <Eyebrow>{t('Runner dispatch')}</Eyebrow>
           <h1>
-            Coordinated, <em>not just requested.</em>
+            {t('Coordinated,')} <em>{t('not just requested.')}</em>
           </h1>
           <p className="view-lede">
-            The nearest free runner is suggested for every matched rescue. Status moves Pending → Assigned → Picked up →
-            Delivered, and only Delivered counts toward impact.
+            {t('The nearest free runner is suggested for every matched rescue. Status moves Pending → Assigned → Picked up → Delivered, and only Delivered counts toward impact.')}
           </p>
         </div>
-        <DemoBadge>Simulated runners · no live GPS</DemoBadge>
+        <DemoBadge>{t('Simulated runners · no live GPS')}</DemoBadge>
       </header>
 
       <section className="runners">
@@ -119,10 +120,10 @@ export function Dispatch({
               <div className="runner-info">
                 <strong>{r.name}</strong>
                 <span>
-                  {r.vehicle} · based {r.area} · {r.completed} runs
+                  {t(r.vehicle)} · {r.area} · {t('{n} runs', { n: r.completed })}
                 </span>
                 <em className={cx('runner-state', active ? 'busy' : r.onShift ? 'free' : 'off')}>
-                  {active ? `On run: ${active.name}` : r.onShift ? 'Available' : 'Off shift'}
+                  {active ? t('On run: {name}', { name: active.name }) : r.onShift ? t('Available') : t('Off shift')}
                 </em>
               </div>
               <button
@@ -146,12 +147,12 @@ export function Dispatch({
           return (
             <div key={l.stage} className={`lane lane-${l.stage.replace(' ', '').toLowerCase()}`}>
               <header>
-                <strong>{l.title}</strong>
+                <strong>{t(l.title)}</strong>
                 <em>{items.length}</em>
-                <span>{l.hint}</span>
+                <span>{t(l.hint)}</span>
               </header>
               <div className="lane-body">
-                {items.length === 0 ? <p className="lane-empty">Nothing here</p> : items.map((d) => <JobCard key={d.id} d={d} />)}
+                {items.length === 0 ? <p className="lane-empty">{t('Nothing here')}</p> : items.map((d) => <JobCard key={d.id} d={d} />)}
               </div>
             </div>
           )

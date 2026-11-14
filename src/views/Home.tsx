@@ -5,6 +5,10 @@ import { assessFeasibility, formatClock, impactTotals, sameLocalDay } from '../l
 import { DripUnderline, FallingDrop, Squiggle } from '../components/Art'
 import { CountUp, VerdictPill } from '../components/ui'
 import type { View } from '../components/Sidebar'
+import { Garden } from '../components/Garden'
+import { CityMap } from '../components/CityMap'
+import { donorStreaks } from '../lib/streaks'
+import { useT } from '../lib/i18n'
 
 // UNEP Food Waste Index Report 2024: India ≈ 78.1 million tonnes of food waste a year (2022 data).
 const INDIA_KG_PER_SECOND = 78.1e9 / (365.25 * 24 * 3600)
@@ -27,13 +31,15 @@ const eventIcon: Record<TimelineKey, typeof Bike> = {
   delivered: PackageCheck,
 }
 
-function relTime(at: number, now: number) {
+function relTime(at: number, now: number, t: (k: string, v?: Record<string, string | number>) => string) {
   const m = Math.max(0, Math.round((now - at) / 60000))
-  if (m < 1) return 'just now'
-  if (m < 60) return `${m} min ago`
+  if (m < 1) return t('just now')
+  if (m < 60) return t('{n} min ago', { n: m })
   const h = Math.floor(m / 60)
-  return h < 24 ? `${h} h ago` : formatClock(at)
+  return h < 24 ? t('{n} h ago', { n: h }) : formatClock(at)
 }
+
+const DAYS = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
 
 export function Home({
   state,
@@ -48,18 +54,21 @@ export function Home({
   onOpen: (d: Donation) => void
   onNavigate: (v: View) => void
 }) {
+  const { t } = useT()
   const { donations, history } = state
+  const streaks = donorStreaks(history, now).slice(0, 4)
+  const wilted = donations.filter((d) => d.status === 'Available' && d.safeUntil <= now)
   const today = history.filter((r) => sameLocalDay(r.deliveredAt, now))
   const todayMeals = today.reduce((s, r) => s + r.servings, 0)
   const totals = impactTotals(history)
   const recentDeliveries = [...history].sort((a, b) => b.deliveredAt - a.deliveredAt).slice(0, 3)
 
   const pipeline = [
-    { label: 'Listed', value: donations.filter((d) => d.status === 'Available').length, Icon: ClipboardList },
-    { label: 'NGO matched', value: donations.filter((d) => d.status === 'Reserved' && d.stage === 'Pending').length, Icon: Building2 },
-    { label: 'Runner assigned', value: donations.filter((d) => d.stage === 'Assigned').length, Icon: Bike },
-    { label: 'Picked up', value: donations.filter((d) => d.stage === 'Picked Up').length, Icon: Route },
-    { label: 'Delivered today', value: today.length, Icon: PackageCheck },
+    { label: t('Listed'), value: donations.filter((d) => d.status === 'Available').length, Icon: ClipboardList },
+    { label: t('NGO matched'), value: donations.filter((d) => d.status === 'Reserved' && d.stage === 'Pending').length, Icon: Building2 },
+    { label: t('Runner assigned'), value: donations.filter((d) => d.stage === 'Assigned').length, Icon: Bike },
+    { label: t('Picked up'), value: donations.filter((d) => d.stage === 'Picked Up').length, Icon: Route },
+    { label: t('Delivered today'), value: today.length, Icon: PackageCheck },
   ]
 
   const attention = donations
@@ -76,12 +85,12 @@ export function Home({
   const ticker = [...history]
     .sort((a, b) => b.deliveredAt - a.deliveredAt)
     .slice(0, 8)
-    .map((r) => `${r.servings} meals · ${r.food} → ${r.ngoName}`)
+    .map((r) => `${t('{n} meals', { n: r.servings })} · ${r.food} → ${r.ngoName}`)
 
   return (
     <div className="home">
       <section className="waste-hero">
-        <p className="waste-lead">Since you opened this page, India has thrown away</p>
+        <p className="waste-lead">{t('Since you opened this page, India has thrown away')}</p>
         <div className="waste-number">
           <strong>
             <WasteCounter /> kg
@@ -91,9 +100,9 @@ export function Home({
           <FallingDrop className="fd-2" delay={1.3} />
         </div>
         <p className="waste-tail">
-          of food. About <b>2.5 tonnes every second</b> — while a few streets away, someone is waiting for a meal.
+          {t('of food. About')} <b>{t('2.5 tonnes every second')}</b> {t('— while a few streets away, someone is waiting for a meal.')}
         </p>
-        <span className="source">Estimate from UNEP Food Waste Index Report 2024: India ≈ 78.1 million tonnes/yr (2022).</span>
+        <span className="source">{t('Estimate from UNEP Food Waste Index Report 2024: India ≈ 78.1 million tonnes/yr (2022).')}</span>
       </section>
 
       {ticker.length > 0 && (
@@ -110,23 +119,22 @@ export function Home({
 
       <section className="room-band">
         <div className="room-copy">
-          <span className="kicker kicker-dark">Meanwhile, here</span>
+          <span className="kicker kicker-dark">{t('Meanwhile, here')}</span>
           <h2>
             <span className="room-num">
               <CountUp value={todayMeals} />
             </span>{' '}
-            meals got a <em>second serve</em> today.
+            {t('meals got a')} <em>{t('second serve')}</em> {t('today.')}
           </h2>
           <p>
-            {totals.meals.toLocaleString('en-IN')} meals across {totals.deliveries} delivered rescues so far. Counted only
-            when a runner hands the food over — never on listing.
+            {t('{meals} meals across {n} delivered rescues so far. Counted only when a runner hands the food over — never on listing.', { meals: totals.meals.toLocaleString('en-IN'), n: totals.deliveries })}
           </p>
           <div className="room-actions">
             <button className="btn btn-ink btn-lg" onClick={onAdd}>
-              <Plus size={18} /> List surplus food
+              <Plus size={18} /> {t('List surplus food')}
             </button>
             <button className="btn btn-outline-ink btn-lg" onClick={() => onNavigate('live')}>
-              <Tv size={18} /> Put it on the big screen
+              <Tv size={18} /> {t('Put it on the big screen')}
             </button>
           </div>
         </div>
@@ -136,7 +144,7 @@ export function Home({
               <span className="feed-dot" />
               <div>
                 <strong>
-                  {r.food} · {r.servings} meals
+                  {r.food} · {t('{n} meals', { n: r.servings })}
                 </strong>
                 <span>
                   → {r.ngoName} · {sameLocalDay(r.deliveredAt, now) ? formatClock(r.deliveredAt) : new Date(r.deliveredAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
@@ -147,26 +155,30 @@ export function Home({
         </ul>
       </section>
 
+      <div className="home-garden">
+        <Garden history={history} wilted={wilted} now={now} />
+      </div>
+
       <section className="manifesto">
         <h2>
-          Not a listing site.
+          {t('Not a listing site.')}
           <br />
-          <span>A rescue system.</span>
+          <span>{t('A rescue system.')}</span>
         </h2>
-        <p>Four steps, every one explained on screen. Rule-based and transparent — no black box.</p>
+        <p>{t('Four steps, every one explained on screen. Rule-based and transparent — no black box.')}</p>
       </section>
 
       <ol className="steps">
         {[
           ['Check the clock', 'Packing + travel + a 15-minute buffer against the safe window. Feasible, at risk, or too late.'],
-          ['Pick the right NGO', 'Six safety gates, then a 0–100 score. Everyone ruled out gets a reason.'],
+          ['Pick the right NGO', 'Seven safety gates, a kitchen-compatibility radar for fridge space, diet and meal times, then a 0–100 score.'],
           ['Send a runner', 'Nearest free volunteer suggested. Assigned → picked up → delivered, every step timestamped.'],
-          ['Print the receipt', 'Every delivered meal gets a receipt you can download and share. Counted once.'],
-        ].map(([t, d], i) => (
-          <li key={t}>
+          ['Grow the garden', 'Every delivery blooms a flower and prints a receipt you can share. Counted once, never on listing.'],
+        ].map(([title, d], i) => (
+          <li key={title}>
             <span className="step-no">0{i + 1}</span>
-            <strong>{t}</strong>
-            <p>{d}</p>
+            <strong>{t(title)}</strong>
+            <p>{t(d)}</p>
           </li>
         ))}
       </ol>
@@ -182,16 +194,29 @@ export function Home({
         ))}
       </section>
 
+      <section className="home-map">
+        <div className="home-map-head">
+          <div>
+            <span className="kicker">{t('Live map')}</span>
+            <h2>{t('Watch the city rescue itself.')}</h2>
+          </div>
+          <button className="btn btn-ghost-light" onClick={() => onNavigate('map')}>
+            {t('Open the live map')} <ArrowUpRight size={16} />
+          </button>
+        </div>
+        <CityMap state={state} now={now} replay={null} onOpen={onOpen} />
+      </section>
+
       <section className="split">
         <div className="panel panel-blush">
           <div className="panel-head">
-            <h3>Needs attention</h3>
+            <h3>{t('Needs attention')}</h3>
             <button className="text-link dark" onClick={() => onNavigate('board')}>
-              Rescue board <ArrowUpRight size={15} />
+              {t('Rescue board')} <ArrowUpRight size={15} />
             </button>
           </div>
           {attention.length === 0 ? (
-            <p className="empty">Every open listing has comfortable safe time.</p>
+            <p className="empty">{t('Every open listing has comfortable safe time.')}</p>
           ) : (
             <ul className="attention">
               {attention.map(({ d, f }) => (
@@ -212,14 +237,14 @@ export function Home({
           )}
           {attention.length > 0 && (
             <span className="annotation">
-              <Squiggle /> the clock decides, not the queue
+              <Squiggle /> {t('the clock decides, not the queue')}
             </span>
           )}
         </div>
 
         <div className="panel">
           <div className="panel-head">
-            <h3>Recent activity</h3>
+            <h3>{t('Recent activity')}</h3>
           </div>
           <ul className="activity">
             {activity.map((a) => {
@@ -233,13 +258,45 @@ export function Home({
                     <strong>{a.d.name}</strong>
                     <span>{a.note}</span>
                   </button>
-                  <time>{relTime(a.at, now)}</time>
+                  <time>{relTime(a.at, now, t)}</time>
                 </li>
               )
             })}
           </ul>
         </div>
       </section>
+
+      {streaks.length > 0 && (
+        <section className="streaks">
+          <div className="streaks-head">
+            <div>
+              <span className="kicker">{t('Rescue streaks')}</span>
+              <h2>{t('Donors who keep showing up.')}</h2>
+            </div>
+            <p>{t('A streak counts every day in a row a donor’s food was actually delivered. Miss a day and it resets.')}</p>
+          </div>
+          <div className="streak-grid">
+            {streaks.map((s, i) => (
+              <article key={s.donor} className={`streak-card${s.days >= 3 ? ' hot' : ''}`} style={{ animationDelay: `${i * 70}ms` }}>
+                <strong>{s.donor}</strong>
+                <span className="streak-num">
+                  {s.days >= 2 ? '🔥' : '🌱'} {s.days} <small>{t('day streak')}</small>
+                </span>
+                <div className="streak-week">
+                  {s.week.map((on, k) => (
+                    <span key={k} className={on ? 'on' : ''}>
+                      {DAYS[new Date(now - (6 - k) * 86400000).getDay()]}
+                    </span>
+                  ))}
+                </div>
+                <span className="streak-meta">
+                  {t('{n} rescues · {m} meals', { n: s.total, m: s.meals })}
+                </span>
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   )
 }

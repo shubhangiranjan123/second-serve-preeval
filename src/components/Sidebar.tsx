@@ -1,16 +1,31 @@
-import { BarChart3, Bike, Building2, Home, Plus, Soup, Tv } from 'lucide-react'
+import { BarChart3, Bike, Building2, Home, Map, Plus, Soup, Tv } from 'lucide-react'
 import { Wordmark } from './Art'
 import { cx } from './ui'
+import { LANGS, useT } from '../lib/i18n'
 
-export type View = 'home' | 'board' | 'ngos' | 'dispatch' | 'impact' | 'live'
+export type View = 'home' | 'board' | 'map' | 'ngos' | 'dispatch' | 'impact' | 'live'
 
 export const NAV: Array<{ id: View; label: string; short: string; Icon: typeof Soup }> = [
   { id: 'home', label: 'Home', short: 'Home', Icon: Home },
   { id: 'board', label: 'Rescue board', short: 'Board', Icon: Soup },
+  { id: 'map', label: 'Live map', short: 'Map', Icon: Map },
   { id: 'ngos', label: 'NGO network', short: 'NGOs', Icon: Building2 },
   { id: 'dispatch', label: 'Runner dispatch', short: 'Runners', Icon: Bike },
   { id: 'impact', label: 'Impact', short: 'Impact', Icon: BarChart3 },
 ]
+
+export function LangToggle() {
+  const { lang, setLang } = useT()
+  return (
+    <div className="lang-toggle" role="group" aria-label="Language">
+      {LANGS.map((l) => (
+        <button key={l.id} className={cx(lang === l.id && 'on')} onClick={() => setLang(l.id)} aria-pressed={lang === l.id} title={l.name}>
+          {l.label}
+        </button>
+      ))}
+    </div>
+  )
+}
 
 export function TopNav({
   view,
@@ -23,6 +38,7 @@ export function TopNav({
   counts: Partial<Record<View, number>>
   onAdd: () => void
 }) {
+  const { t } = useT()
   return (
     <header className="topnav">
       <a
@@ -47,17 +63,18 @@ export function TopNav({
               onNavigate(id)
             }}
           >
-            {label}
+            {t(label)}
             {counts[id] ? <em>{counts[id]}</em> : null}
           </a>
         ))}
       </nav>
       <div className="topnav-right">
+        <LangToggle />
         <button className="btn btn-ghost-light room-btn" onClick={() => onNavigate('live')}>
-          <Tv size={16} /> <span>Room wall</span>
+          <Tv size={16} /> <span>{t('Room wall')}</span>
         </button>
         <button className="btn btn-pink" onClick={onAdd}>
-          <Plus size={17} /> <span>List surplus food</span>
+          <Plus size={17} /> <span>{t('List surplus food')}</span>
         </button>
       </div>
     </header>

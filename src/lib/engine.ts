@@ -6,7 +6,7 @@
 // This is a rule-based, explainable scoring system. It is NOT machine
 // learning: no model is trained anywhere.
 
-import type { Donation, Ngo, RescueRecord, Runner, StorageType } from '../types'
+import type { Category, Donation, Ngo, RescueRecord, Runner, StorageType } from '../types'
 
 export const MIN = 60_000
 
@@ -21,7 +21,7 @@ export const POLICY = {
 }
 
 // Ranking weights (sum to 1.0). Same as the final build.
-export const MATCH_WEIGHTS = { travel: 0.35, need: 0.3, safety: 0.2, hours: 0.15 }
+export const MATCH_WEIGHTS = { travel: 0.25, compat: 0.3, need: 0.2, safety: 0.15, hours: 0.1 }
 
 // Impact assumptions. These are ILLUSTRATIVE estimates, not measurements.
 export const IMPACT = {
@@ -197,12 +197,134 @@ export function hoursLabel(ngo: Ngo) {
   return `${fmt(ngo.opensHour)} – ${fmt(ngo.closesHour)}`
 }
 
+export type StorageUnit = 'fridge' | 'freezer' | 'dry' | 'shelf'
+
+export type StorageNeed = { unit: StorageUnit; amount: number; measure: 'L' | 'kg' | '' }
+
+const LITRES_PER_SERVING: Record<Category, number> = { Meals: 0.6, Bakery: 0.4, Produce: 0.5, 'Dry rations': 0.3 }
+
+export function storageNeed(d: Pick<Donation, 'storage' | 'category' | 'servings' | 'unit' | 'quantity'>): StorageNeed {
+  const litres = d.unit === 'kg' ? Math.ceil(d.quantity * 2.2) : Math.ceil(d.servings * LITRES_PER_SERVING[d.category])
+  if (d.storage === 'Chilled') return { unit: 'fridge', amount: litres, measure: 'L' }
+  if (d.storage === 'Frozen') return { unit: 'freezer', amount: litres, measure: 'L' }
+  if (d.category === 'Dry rations') return { unit: 'dry', amount: d.unit === 'kg' ? d.quantity : Math.ceil(d.servings * IMPACT.kgPerServing), measure: 'kg' }
+  return { unit: 'shelf', amount: 0, measure: '' }
+}
+
+export function unitCapacity(ngo: Ngo, unit: StorageUnit) {
+  if (unit === 'fridge') return ngo.refrigeration ? ngo.fridgeLitres : 0
+  if (unit === 'freezer') return ngo.freezer ? ngo.freezerLitres : 0
+  if (unit === 'dry') return ngo.dryStoreKg
+  return Infinity
+}
+
+export function unitUsage(ngo: Ngo, unit: StorageUnit, donations: Donation[], exceptId?: number) {
+  return donations
+    .filter((d) => d.status === 'Reserved' && d.ngoId === ngo.id && d.id !== exceptId)
+    .map(storageNeed)
+    .filter((n) => n.unit === unit)
+    .reduce((s, n) => s + n.amount, 0)
+}
+
+export type CompatKey = 'storage' | 'cold' | 'diet' | 'wants' | 'timing' | 'reheat'
+
+export const COMPAT_WEIGHTS: Record<CompatKey, number> = {
+  storage: 0.25,
+  cold: 0.15,
+  diet: 0.15,
+  wants: 0.2,
+  timing: 0.15,
+  reheat: 0.1,
+}
+
+export const COMPAT_LABELS: Record<CompatKey, string> = {
+  storage: 'Storage room',
+  cold: 'Cold chain',
+  diet: 'Diet fit',
+  wants: 'Asked for it',
+  timing: 'Meal timing',
+  reheat: 'Can reheat',
+}
+
+export type StorageFit = {
+  unit: StorageUnit
+  need: number
+  measure: 'L' | 'kg' | ''
+  capacity: number
+  usedBefore: number
+  usedAfter: number
+}
+
+export function nextMealAfter(ngo: Ngo, at: number): number | null {
+  if (ngo.mealHours.length === 0) return null
+  const day = new Date(at)
+  const candidates: number[] = []
+  for (const offset of [0, 1]) {
+    for (const h of ngo.mealHours) {
+      const t = new Date(day)
+      t.setDate(day.getDate() + offset)
+      t.setHours(h, 0, 0, 0)
+      if (t.getTime() >= at) candidates.push(t.getTime())
+    }
+  }
+  return candidates.length ? Math.min(...candidates) : null
+}
+
+export function compatibility(donation: Donation, ngo: Ngo, donations: Donation[], arrival: number) {
+  const need = storageNeed(donation)
+  const capacity = unitCapacity(ngo, need.unit)
+  const usedBefore = need.unit === 'shelf' ? 0 : unitUsage(ngo, need.unit, donations, donation.id)
+  const usedAfter = usedBefore + need.amount
+  const fit: StorageFit = { unit: need.unit, need: need.amount, measure: need.measure, capacity, usedBefore, usedAfter }
+
+  const storage =
+    need.unit === 'shelf' ? 1 : capacity <= 0 ? 0 : clamp01(0.45 + 0.55 * ((capacity - usedAfter) / capacity))
+
+  const cold =
+    donation.storage === 'Ambient'
+      ? ngo.refrigeration
+        ? 1
+        : 0.75
+      : ngo.refrigeration && ngo.freezer
+        ? 1
+        : 0.7
+
+  const diet =
+    donation.diet === 'Jain'
+      ? ngo.jainKitchen
+        ? 1
+        : 0.45
+      : donation.diet === 'Veg'
+        ? ngo.acceptsNonVeg
+          ? 0.85
+          : 1
+        : 1
+
+  const wants = ngo.prefers.includes(donation.category) ? 1 : 0.4
+
+  const meal = nextMealAfter(ngo, arrival)
+  let timing = 1
+  if (donation.category === 'Meals') {
+    if (meal === null) timing = 0.5
+    else if (meal <= donation.safeUntil) timing = clamp01(1 - (meal - arrival) / (6 * 60 * MIN) * 0.4)
+    else timing = ngo.canReheat && ngo.refrigeration ? 0.55 : 0.2
+  }
+
+  const reheat = donation.category === 'Meals' ? (ngo.canReheat ? 1 : 0.55) : 1
+
+  const factors: Record<CompatKey, number> = { storage, cold, diet, wants, timing, reheat }
+  const score = Math.round(
+    100 * (Object.keys(factors) as CompatKey[]).reduce((s, k) => s + factors[k] * COMPAT_WEIGHTS[k], 0),
+  )
+  return { score, factors, fit, nextMeal: meal }
+}
+
 // ---------------------------------------------------------------------
 // Smart NGO matching
 //   Step 1: hard eligibility gates; any failure excludes the NGO with a reason.
 //   Step 2: a weighted 0–100 score ranks the eligible ones.
 // ---------------------------------------------------------------------
-export type ScoreBreakdown = { travel: number; need: number; safety: number; hours: number }
+export type ScoreBreakdown = { travel: number; compat: number; need: number; safety: number; hours: number }
 
 export type NgoEvaluation = {
   ngo: Ngo
@@ -217,6 +339,10 @@ export type NgoEvaluation = {
   arrival: number
   safetyMarginMin: number
   remaining: number
+  compat: number
+  compatFactors: Record<CompatKey, number>
+  storageFit: StorageFit
+  nextMeal: number | null
 }
 
 export function evaluateNgo(
@@ -249,6 +375,15 @@ export function evaluateNgo(
   const departure = Math.max(now + POLICY.dispatchLeadMinutes * MIN, donation.readyAt)
   const arrival = departure + travelMin * MIN
 
+  const c = compatibility(donation, ngo, donations, arrival)
+  const unitName = c.fit.unit === 'fridge' ? 'Fridge' : c.fit.unit === 'freezer' ? 'Freezer' : 'Dry store'
+  if (storage.ok && c.fit.unit !== 'shelf' && c.fit.usedAfter > c.fit.capacity)
+    failures.push(
+      `${unitName} has ${Math.max(0, c.fit.capacity - c.fit.usedBefore)} ${c.fit.measure} free; this needs about ${c.fit.need} ${c.fit.measure}`,
+    )
+  else if (c.fit.unit !== 'shelf')
+    reasons.push(`${unitName}: ${c.fit.need} ${c.fit.measure} fits, ${c.fit.capacity - c.fit.usedAfter} ${c.fit.measure} still free after`)
+
   const opening = openingCheck(ngo, arrival)
   if (!opening.open) failures.push(`Closed at estimated arrival ${formatClock(arrival)} (${hoursLabel(ngo)})`)
 
@@ -260,6 +395,7 @@ export function evaluateNgo(
 
   const breakdown: ScoreBreakdown = {
     travel: clamp01(1 - travelMin / 45),
+    compat: c.score / 100,
     need: ngo.dailyCapacity > 0 ? clamp01(remaining / ngo.dailyCapacity) : 0,
     safety: clamp01(safetyMarginMin / 120),
     hours: opening.open ? clamp01(opening.minutesToClose / 120) : 0,
@@ -268,6 +404,7 @@ export function evaluateNgo(
   const score = Math.round(
     100 *
       (MATCH_WEIGHTS.travel * breakdown.travel +
+        MATCH_WEIGHTS.compat * breakdown.compat +
         MATCH_WEIGHTS.need * breakdown.need +
         MATCH_WEIGHTS.safety * breakdown.safety +
         MATCH_WEIGHTS.hours * breakdown.hours),
@@ -282,11 +419,17 @@ export function evaluateNgo(
         ? 'Open 24 hours'
         : `Open for ${formatDuration(opening.minutesToClose)} after arrival`,
     )
+  if (ngo.prefers.includes(donation.category)) reasons.push(`They asked for ${donation.category.toLowerCase()}`)
+  if (donation.category === 'Meals' && c.nextMeal !== null && c.nextMeal <= donation.safeUntil)
+    reasons.push(`Served at their ${formatClock(c.nextMeal)} meal, inside the safe window`)
 
   if (safetyMarginMin >= 0 && safetyMarginMin < POLICY.atRiskMarginMinutes)
     warnings.push('Tight safety margin: assign a runner immediately')
   if (remaining >= donation.servings && remaining - donation.servings < ngo.dailyCapacity * 0.1)
     warnings.push("This will fill almost all of today's capacity")
+  if (donation.category === 'Meals' && c.nextMeal !== null && c.nextMeal > donation.safeUntil)
+    warnings.push(`Next meal service ${formatClock(c.nextMeal)} is after the safe window`)
+  if (donation.diet === 'Jain' && !ngo.jainKitchen) warnings.push('Kitchen is not Jain-separated')
   if (donation.storage !== 'Ambient') warnings.push('Keep the food cold in transit')
 
   return {
@@ -302,6 +445,10 @@ export function evaluateNgo(
     arrival,
     safetyMarginMin,
     remaining,
+    compat: c.score,
+    compatFactors: c.factors,
+    storageFit: c.fit,
+    nextMeal: c.nextMeal,
   }
 }
 

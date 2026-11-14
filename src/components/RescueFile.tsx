@@ -17,6 +17,8 @@ import { MatchPanel } from './MatchPanel'
 import { RescueTimeline } from './RescueTimeline'
 import { StatusPill, cx } from './ui'
 import { Receipt } from './Receipt'
+import { useT } from '../lib/i18n'
+import { Bud } from './Bud'
 
 type Props = {
   donation: Donation
@@ -29,6 +31,7 @@ type Props = {
 }
 
 export function RescueFile({ donation: d, state, now, store, toast, onClose, onOpenImpact }: Props) {
+  const { t } = useT()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
     window.addEventListener('keydown', onKey)
@@ -68,12 +71,13 @@ export function RescueFile({ donation: d, state, now, store, toast, onClose, onO
         <header className="drawer-head">
           <CategoryToken category={d.category} size={56} />
           <div className="drawer-title">
-            <span className="drawer-kicker">Rescue file · #{String(d.id).padStart(3, '0')}</span>
+            <span className="drawer-kicker">{t('Rescue file')} · #{String(d.id).padStart(3, '0')}</span>
             <h2>{d.name}</h2>
             <span className="drawer-sub">
               {d.donor} · {d.area}
             </span>
           </div>
+          <Bud d={d} now={now} size={58} />
           <button className="icon-btn" onClick={onClose} aria-label="Close rescue file">
             <X size={20} />
           </button>
@@ -81,12 +85,12 @@ export function RescueFile({ donation: d, state, now, store, toast, onClose, onO
 
         <div className="drawer-facts">
           <StatusPill status={d.status} stage={d.stage} />
-          <span className="fact"><Users size={14} /> {d.servings} servings</span>
+          <span className="fact"><Users size={14} /> {t('{n} servings', { n: d.servings })}</span>
           <span className={cx('fact', d.diet === 'Non-veg' ? 'fact-nonveg' : 'fact-veg')}>
-            <i className="diet-mark" /> {d.diet}
+            <i className="diet-mark" /> {t(d.diet)}
           </span>
           <span className="fact">
-            {d.storage === 'Ambient' ? <Clock size={14} /> : <Snowflake size={14} />} {d.storage}
+            {d.storage === 'Ambient' ? <Clock size={14} /> : <Snowflake size={14} />} {t(d.storage)}
           </span>
           <span className="fact"><MapPin size={14} /> {d.address}</span>
         </div>
@@ -95,7 +99,7 @@ export function RescueFile({ donation: d, state, now, store, toast, onClose, onO
         <div className="drawer-body">
           {/* 01 — Feasibility */}
           <section className="step">
-            <div className="step-label"><span>01</span> Rescue feasibility</div>
+            <div className="step-label"><span>01</span> {t('Rescue feasibility')}</div>
             {d.status === 'Delivered' ? (
               <div className="delivered-banner">
                 <PackageCheck size={22} />
@@ -122,17 +126,17 @@ export function RescueFile({ donation: d, state, now, store, toast, onClose, onO
 
           {/* 02 — Matching */}
           <section className="step">
-            <div className="step-label"><span>02</span> Smart NGO matching</div>
+            <div className="step-label"><span>02</span> {t('Smart NGO matching')}</div>
             {match ? (
               safeLeft <= 0 ? (
-                <p className="step-muted">Safe window closed — matching is switched off for this listing.</p>
+                <p className="step-muted">{t('Safe window closed — matching is switched off for this listing.')}</p>
               ) : (
                 <MatchPanel
                   result={match}
                   scanKey={d.id}
                   onReserve={(e) => {
                     store.reserve(d.id, e.ngo.id, e.score)
-                    toast(`Reserved for ${e.ngo.name}. Now assign a runner.`)
+                    toast(t('Reserved for {name}. Now assign a runner.', { name: e.ngo.name }))
                   }}
                 />
               )
@@ -150,10 +154,10 @@ export function RescueFile({ donation: d, state, now, store, toast, onClose, onO
                     className="btn btn-ghost btn-sm"
                     onClick={() => {
                       store.releaseMatch(d.id)
-                      toast('Match released. The listing is back on the board.', 'info')
+                      toast(t('Match released. The listing is back on the board.'), 'info')
                     }}
                   >
-                    <Undo2 size={14} /> Release
+                    <Undo2 size={14} /> {t('Release')}
                   </button>
                 )}
               </div>
@@ -162,8 +166,8 @@ export function RescueFile({ donation: d, state, now, store, toast, onClose, onO
 
           {/* 03 — Dispatch */}
           <section className={cx('step', d.status === 'Available' && 'step-locked')}>
-            <div className="step-label"><span>03</span> Runner dispatch</div>
-            {d.status === 'Available' && <p className="step-muted">Reserve an organisation first.</p>}
+            <div className="step-label"><span>03</span> {t('Runner dispatch')}</div>
+            {d.status === 'Available' && <p className="step-muted">{t('Reserve an organisation first.')}</p>}
             {d.status !== 'Available' && runner && (
               <div className="runner-chosen">
                 <span className="avatar">{runner.initials}</span>
@@ -183,7 +187,7 @@ export function RescueFile({ donation: d, state, now, store, toast, onClose, onO
                       <div className="runner-meta">
                         <strong>
                           {o.runner.name}
-                          {i === 0 && !unavailable && <em className="tag-suggest">Suggested</em>}
+                          {i === 0 && !unavailable && <em className="tag-suggest">{t('Suggested')}</em>}
                         </strong>
                         <span>
                           {o.runner.vehicle} · {o.km.toFixed(1)} km from pickup ·{' '}
@@ -195,10 +199,10 @@ export function RescueFile({ donation: d, state, now, store, toast, onClose, onO
                         disabled={unavailable}
                         onClick={() => {
                           store.assignRunner(d.id, o.runner.id)
-                          toast(`${o.runner.name} is on the way to ${d.donor}.`)
+                          toast(t('{name} is on the way to {donor}.', { name: o.runner.name, donor: d.donor }))
                         }}
                       >
-                        <Bike size={14} /> Assign
+                        <Bike size={14} /> {t('Assign')}
                       </button>
                     </div>
                   )
@@ -209,24 +213,24 @@ export function RescueFile({ donation: d, state, now, store, toast, onClose, onO
 
           {/* 04 — Tracking */}
           <section className="step">
-            <div className="step-label"><span>04</span> Rescue tracking</div>
+            <div className="step-label"><span>04</span> {t('Rescue tracking')}</div>
             <RescueTimeline donation={d} />
             {d.status === 'Reserved' && d.stage !== 'Pending' && (
               <button
                 className="btn btn-primary btn-block btn-lg"
                 onClick={() => {
                   store.advance(d.id)
-                  if (d.stage === 'Assigned') toast(`Picked up from ${d.donor}. Keep it moving.`, 'info')
-                  else toast(`Delivered! ${d.servings} servings added to lifetime rescues.`)
+                  if (d.stage === 'Assigned') toast(t('Picked up from {donor}. Keep it moving.', { donor: d.donor }), 'info')
+                  else toast(t('Delivered! {n} servings added to lifetime rescues.', { n: d.servings }))
                 }}
               >
                 {d.stage === 'Assigned' ? (
                   <>
-                    <Route size={18} /> Mark picked up
+                    <Route size={18} /> {t('Mark picked up')}
                   </>
                 ) : (
                   <>
-                    <PackageCheck size={18} /> Mark delivered
+                    <PackageCheck size={18} /> {t('Mark delivered')}
                   </>
                 )}
               </button>
@@ -237,15 +241,15 @@ export function RescueFile({ donation: d, state, now, store, toast, onClose, onO
                 record={record}
                 pickedAt={d.timeline.find((t) => t.key === 'picked')?.at}
                 minutesSpare={deliveredEv ? Math.max(0, minutesBetween(deliveredEv.at, d.safeUntil)) : undefined}
-                onDownloaded={() => toast('Receipt saved as PNG — share it anywhere.')}
+                onDownloaded={() => toast(t('Receipt saved as PNG — share it anywhere.'))}
               />
             )}
             {d.status === 'Delivered' && (
               <button className="btn btn-ghost btn-block" onClick={onOpenImpact}>
-                See it in the Impact report <ArrowUpRight size={16} />
+                {t('See it bloom in the garden')} <ArrowUpRight size={16} />
               </button>
             )}
-            <p className="sim-note">Simulated workflow — statuses are updated by a coordinator in this browser. No live GPS.</p>
+            <p className="sim-note">{t('Simulated workflow — statuses are updated by a coordinator in this browser. No live GPS.')}</p>
           </section>
         </div>
       </aside>
