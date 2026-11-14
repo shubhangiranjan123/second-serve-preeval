@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Plus, ScanLine, Search } from 'lucide-react'
+import { ScanLine, Search } from 'lucide-react'
 import type { AppState, Category, Donation } from '../types'
 import { CATEGORIES } from '../data/demoData'
 import { assessFeasibility } from '../lib/engine'
@@ -20,13 +20,11 @@ function statusMatches(s: StatusFilter, d: Donation) {
 export function RescueBoard({
   state,
   now,
-  onAdd,
   onScan,
   onOpen,
 }: {
   state: AppState
   now: number
-  onAdd: () => void
   onScan: () => void
   onOpen: (d: Donation) => void
 }) {
@@ -64,9 +62,6 @@ export function RescueBoard({
           <p className="view-lede">{t('Every listing carries a live safe-time countdown, a feasibility verdict and a bud that wilts as time runs out. Most urgent first.')}</p>
         </div>
         <div className="view-head-actions">
-          <button className="btn btn-ghost-light btn-lg" onClick={onAdd}>
-            <Plus size={18} /> {t('List manually')}
-          </button>
           <button className="btn btn-primary btn-lg" onClick={onScan}>
             <ScanLine size={18} /> {t('Scan & donate')}
           </button>

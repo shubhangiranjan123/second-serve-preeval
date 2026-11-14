@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { AppState, Category, Diet, Donation, Packaging, Screening, StorageType } from '../types'
+import type { AppState, Category, Diet, Donation, MatchWeights, Packaging, Screening, StorageType, TrustApplication, TrustCheckRecord } from '../types'
+import { createInitialApplications, nextStatus, syncNgo, type ReviewAction } from './trust'
 import { createInitialState, findArea } from '../data/demoData'
 import { MIN, estimateWeightKg } from './engine'
 
@@ -42,17 +43,29 @@ function isState(value: unknown): value is AppState {
   )
 }
 
+// Older saves have no TrustCheck data: add the demo applications and make
+// each NGO's verification match its application, without touching anything else.
+export function withTrust(s: AppState, now = Date.now()): AppState {
+  if (Array.isArray(s.applications)) return s
+  const applications = createInitialApplications(now, s.ngos)
+  const ngos = s.ngos.map((n) => {
+    const app = applications.find((a) => a.role === 'recipient' && a.ngoId === n.id)
+    return app ? { ...n, verification: app.status } : n
+  })
+  return { ...s, ngos, applications }
+}
+
 function load(): AppState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const parsed: unknown = JSON.parse(raw)
-      if (isState(parsed)) return parsed
+      if (isState(parsed)) return withTrust(parsed)
     }
   } catch {
     /* fall through to fresh demo data */
   }
-  return createInitialState(Date.now())
+  return withTrust(createInitialState(Date.now()))
 }
 
 export function useRescueStore() {
@@ -83,8 +96,18 @@ export function useRescueStore() {
   }, [state])
 
   const addDonation = useCallback(
-    (input: NewDonationInput, extras: ScreenedExtras = {}): Donation => {
+    (input: NewDonationInput, extras: ScreenedExtras = {}): Donation | null => {
       const now = Date.now()
+      // Duplicate guard: the same food from the same donor listed again within
+      // 10 minutes (double click, resubmitted form) is ignored.
+      const dup = state.donations.find(
+        (d) =>
+          d.status !== 'Delivered' &&
+          d.donor.trim().toLowerCase() === input.donor.trim().toLowerCase() &&
+          d.name.trim().toLowerCase() === input.name.trim().toLowerCase() &&
+          now - d.createdAt < 10 * MIN,
+      )
+      if (dup) return null
       const held = extras.screening?.outcome === 'review'
       const area = findArea(input.area)
       const { safeHours, ...fields } = input
@@ -173,6 +196,9 @@ export function useRescueStore() {
   const assignRunner = useCallback((donationId: number, runnerId: number) => {
     setState((s) => {
       const runner = s.runners.find((r) => r.id === runnerId)
+      // Never double-book: a runner on another live run, or off shift, can't be assigned.
+      const busy = s.donations.some((d) => d.id !== donationId && d.runnerId === runnerId && d.status === 'Reserved' && d.stage !== 'Delivered')
+      if (!runner || !runner.onShift || busy) return s
       return {
         ...s,
         donations: s.donations.map((d) =>
@@ -266,6 +292,55 @@ export function useRescueStore() {
     }))
   }, [])
 
+  const setWeights = useCallback((weights: MatchWeights | null) => {
+    setState((s) => {
+      const next = { ...s }
+      if (weights) next.weights = weights
+      else delete next.weights
+      return next
+    })
+  }, [])
+
+  // Quantity-aware allocation: carve `servings` off an available listing into
+  // a new listing (same food, same deadline) so it can go to an NGO that only
+  // has room for part of it. The original keeps the rest.
+  const splitDonation = useCallback(
+    (donationId: number, servings: number): Donation | null => {
+      const d = state.donations.find((x) => x.id === donationId)
+      if (!d || d.status !== 'Available' || servings < 1 || servings >= d.servings) return null
+      const ratio = servings / d.servings
+      const now = Date.now()
+      const child: Donation = {
+        ...d,
+        id: Math.max(0, ...state.donations.map((x) => x.id)) + 1,
+        servings,
+        quantity: d.unit === 'servings' ? servings : Math.max(0.1, Math.round(d.quantity * ratio * 10) / 10),
+        ngoId: null,
+        runnerId: null,
+        stage: 'Pending',
+        status: 'Available',
+        timeline: [...d.timeline.filter((t) => t.key === 'created'), { key: 'created', at: now, note: `Split ${servings} of ${d.servings} servings from listing #${String(d.id).padStart(3, '0')}` }],
+      }
+      setState((s) => ({
+        ...s,
+        donations: [
+          child,
+          ...s.donations.map((x) =>
+            x.id === donationId
+              ? {
+                  ...x,
+                  servings: x.servings - servings,
+                  quantity: x.unit === 'servings' ? x.servings - servings : Math.max(0.1, Math.round(x.quantity * (1 - ratio) * 10) / 10),
+                }
+              : x,
+          ),
+        ],
+      }))
+      return child
+    },
+    [state.donations],
+  )
+
   const toggleShift = useCallback((runnerId: number) => {
     setState((s) => ({
       ...s,
@@ -274,10 +349,76 @@ export function useRescueStore() {
   }, [])
 
   const reset = useCallback(() => {
-    setState(createInitialState(Date.now()))
+    setState(withTrust(createInitialState(Date.now())))
   }, [])
 
-  return { state, addDonation, approveReview, reserve, releaseMatch, assignRunner, advance, withdraw, toggleShift, reset }
+  // ---------------- TrustCheck ----------------
+  const submitApplication = useCallback(
+    (draft: TrustApplication, asDraft = false): TrustApplication => {
+      const now = Date.now()
+      const apps = state.applications ?? []
+      const isNew = !apps.some((a) => a.id === draft.id)
+      const saved: TrustApplication = {
+        ...draft,
+        id: isNew ? Math.max(0, ...apps.map((a) => a.id)) + 1 : draft.id,
+        status: asDraft ? 'Not Submitted' : 'Submitted',
+        demo: false,
+        submittedAt: asDraft ? null : now,
+        history: asDraft
+          ? draft.history
+          : [...draft.history, { at: now, by: 'Applicant', action: draft.status === 'Resubmission Required' ? 'Resubmitted' : 'Submitted' }],
+      }
+      setState((s) => {
+        const list = s.applications ?? []
+        const next = list.some((a) => a.id === saved.id) ? list.map((a) => (a.id === saved.id ? saved : a)) : [saved, ...list]
+        const { ngos, ngoId } = syncNgo(s, saved)
+        return { ...s, ngos, applications: next.map((a) => (a.id === saved.id ? { ...saved, ngoId } : a)) }
+      })
+      return saved
+    },
+    [state.applications],
+  )
+
+  const reviewApplication = useCallback((id: number, action: ReviewAction, note?: string) => {
+    setState((s) => {
+      const app = (s.applications ?? []).find((a) => a.id === id)
+      if (!app) return s
+      const status = nextStatus(action)
+      const updated: TrustApplication = {
+        ...app,
+        status,
+        decisionNote: action === 'reject' || action === 'resubmit' ? note : app.decisionNote,
+        history: [...app.history, { at: Date.now(), by: 'Coordinator', action: status, note }],
+      }
+      const { ngos, ngoId } = syncNgo(s, updated)
+      const final = { ...updated, ngoId }
+      return { ...s, ngos, applications: (s.applications ?? []).map((a) => (a.id === id ? final : a)) }
+    })
+  }, [])
+
+  const addTrustCheck = useCallback((id: number, check: Omit<TrustCheckRecord, 'id' | 'at' | 'by'>) => {
+    setState((s) => ({
+      ...s,
+      applications: (s.applications ?? []).map((a) =>
+        a.id === id
+          ? {
+              ...a,
+              checks: [...a.checks, { ...check, id: Math.max(0, ...a.checks.map((c) => c.id)) + 1, at: Date.now(), by: 'Coordinator' }],
+              history: [...a.history, { at: Date.now(), by: 'Coordinator', action: `Checked ${check.portal}`, note: `${check.result}${check.reference ? ` · ${check.reference}` : ''}` }],
+            }
+          : a,
+      ),
+    }))
+  }, [])
+
+  const toggleTrustItem = useCallback((id: number, key: string) => {
+    setState((s) => ({
+      ...s,
+      applications: (s.applications ?? []).map((a) => (a.id === id ? { ...a, checklist: { ...a.checklist, [key]: !a.checklist[key] } } : a)),
+    }))
+  }, [])
+
+  return { state, addDonation, approveReview, setWeights, splitDonation, submitApplication, reviewApplication, addTrustCheck, toggleTrustItem, reserve, releaseMatch, assignRunner, advance, withdraw, toggleShift, reset }
 }
 
 export type RescueStore = ReturnType<typeof useRescueStore>

@@ -69,7 +69,7 @@ export function NgoNetwork({ state, now }: { state: AppState; now: number }) {
                 {n.verification === 'Verified' ? (
                   <span className="tag tag-ok"><BadgeCheck size={13} /> {t('Verified')}</span>
                 ) : (
-                  <span className="tag tag-wait"><Hourglass size={13} /> {t('Pending review')}</span>
+                  <span className="tag tag-wait"><Hourglass size={13} /> {t(n.verification === 'Pending' ? 'Pending review' : n.verification)} · TrustCheck</span>
                 )}
                 <span className={cx('tag', open ? 'tag-open' : 'tag-closed')}>
                   <Clock size={13} /> {open ? t('Open now') : t('Closed')} · {hoursLabel(n)}

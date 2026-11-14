@@ -579,7 +579,9 @@ p { margin: 0; }
 .modal-scrim { display: grid; place-items: center; padding: 20px; overflow-y: auto; }
 .modal { background: var(--blush); color: var(--paper-ink); border-radius: 36px; animation: modalIn 0.5s var(--bounce) both; }
 @keyframes modalIn { from { opacity: 0; transform: translateY(30px) scale(0.96) rotate(1deg); } }
-.form-modal { width: min(1100px, 100%); max-height: calc(100vh - 40px); display: flex; flex-direction: column; overflow: hidden; }
+/* overflow: clip (not hidden): a hidden element can still be scrolled by the browser when
+   something inside it gets focus, which used to slide the whole form out of view. */
+.form-modal { width: min(1100px, 100%); max-height: calc(100vh - 40px); display: flex; flex-direction: column; overflow: clip; }
 .modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; padding: 28px 32px 16px; border-bottom: 2px dashed var(--blush-3); }
 .modal-head .drawer-kicker { display: block; }
 .modal-head h2 { font-size: 44px; margin-top: 6px; }
@@ -612,8 +614,10 @@ legend { font-family: var(--display); font-weight: 800; font-size: 22px; letter-
 .field .segmented button.on { background: var(--paper-ink); color: var(--pink); }
 .checklist { grid-template-columns: 1fr; gap: 6px; background: #fff; border-radius: 24px; padding: 20px; }
 .checklist legend { float: left; margin-bottom: 6px; }
-.check { display: flex; gap: 12px; align-items: flex-start; font-size: 14px; line-height: 1.4; cursor: pointer; padding: 6px 4px; border-radius: 8px; color: var(--paper-muted); transition: color 0.2s; }
-.check input { position: absolute; opacity: 0; pointer-events: none; }
+.check { position: relative; display: flex; gap: 12px; align-items: flex-start; font-size: 14px; line-height: 1.4; cursor: pointer; padding: 6px 4px; border-radius: 8px; color: var(--paper-muted); transition: color 0.2s; }
+/* The real checkbox sits invisibly on top of its own label (position: relative above),
+   so focusing it never makes the browser scroll another container to find it. */
+.check input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; pointer-events: none; }
 .check-box { width: 22px; height: 22px; border-radius: 7px; border: 2px solid var(--paper-ink); display: grid; place-items: center; flex: none; color: transparent; transition: all 0.3s var(--bounce); }
 .check-on { color: var(--paper-ink); }
 .check-on .check-box { background: var(--pink); border-color: var(--pink); color: var(--ink); transform: rotate(-8deg) scale(1.08); }

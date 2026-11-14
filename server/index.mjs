@@ -32,6 +32,7 @@ const cfg = {
   VISION_PROVIDER: process.env.VISION_PROVIDER,
   GEMINI_API_KEY: process.env.GEMINI_API_KEY,
   GEMINI_MODEL: process.env.GEMINI_MODEL,
+  GEMINI_FALLBACK_MODELS: process.env.GEMINI_FALLBACK_MODELS, // comma list, tried if the main model is busy
   GEMINI_VERTEX: process.env.GEMINI_VERTEX, // '1' only for a Vertex AI express key; AI Studio keys (AIza… or AQ.…) need nothing
   GEMINI_BASE_URL: process.env.GEMINI_BASE_URL, // optional: corporate proxy / test harness
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,

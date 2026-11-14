@@ -49,7 +49,8 @@ export type Screening = {
   }
   aiError?: string // why the scan could not run (then outcome is always 'review')
   edited: string[] // fields the donor changed from the AI suggestion
-  photo?: string // small square thumbnail (data URL)
+  photo?: string // first photo, small square thumbnail (data URL)
+  photos?: string[] // all 1–4 thumbnails of this donation
   review?: { decision: 'approved'; at: number; by: string; note?: string }
 }
 
@@ -95,7 +96,8 @@ export type Donation = {
   screening?: Screening
 }
 
-export type VerificationStatus = 'Verified' | 'Pending'
+// 'Pending' is kept for older saved data; TrustCheck statuses are used from now on.
+export type VerificationStatus = 'Verified' | 'Pending' | 'Not Submitted' | 'Submitted' | 'Under Review' | 'Rejected' | 'Resubmission Required'
 
 export type Ngo = {
   id: number
@@ -150,10 +152,80 @@ export type RescueRecord = {
   seeded?: boolean // pre-loaded demonstration record
 }
 
+export type MatchWeights = { compat: number; travel: number; need: number; safety: number; hours: number }
+
 export type AppState = {
   version: 1
   donations: Donation[]
   ngos: Ngo[]
   runners: Runner[]
   history: RescueRecord[]
+  weights?: MatchWeights // coordinator's matching weights; absent = defaults
+  applications?: TrustApplication[] // TrustCheck (absent in older saves; seeded on load)
+}
+
+// ---- TrustCheck: verified rescue network ----
+export type TrustStatus = 'Not Submitted' | 'Submitted' | 'Under Review' | 'Verified' | 'Rejected' | 'Resubmission Required'
+export type TrustRole = 'donor' | 'recipient'
+export type TrustPortal = 'FoSCoS (FSSAI)' | 'GST search' | 'NGO Darpan' | 'MCA' | 'Phone call' | 'Site visit' | 'Other'
+
+export type TrustDoc = {
+  id: number
+  kind: string // e.g. "FSSAI licence", "Registration certificate", "Premises photo"
+  name: string
+  size: number
+  type: string
+  preview?: string // small image preview (data URL). PDFs and large files are recorded by name only.
+}
+
+export type TrustCheckRecord = {
+  id: number
+  portal: TrustPortal
+  checkedOn: string // yyyy-mm-dd
+  result: 'Match' | 'Mismatch' | 'Not found' | 'Not applicable'
+  reference: string
+  notes: string
+  by: string
+  at: number
+}
+
+export type TrustEvent = { at: number; by: string; action: string; note?: string }
+
+export type TrustApplication = {
+  id: number
+  role: TrustRole
+  status: TrustStatus
+  demo?: boolean
+  orgName: string
+  orgType: string
+  contactName: string
+  phone: string
+  email: string
+  address: string
+  area: string
+  // donor
+  fssai?: string
+  gstin?: string
+  // recipient
+  darpanId?: string
+  registrationType?: 'Trust' | 'Society' | 'Section 8 company' | 'Community kitchen (unregistered)' | 'Religious / community body' | 'Other'
+  registrationNo?: string
+  dailyCapacity?: number
+  refrigeration?: boolean
+  freezer?: boolean
+  fridgeLitres?: number
+  freezerLitres?: number
+  dryStoreKg?: number
+  acceptsNonVeg?: boolean
+  accepts?: Category[]
+  serviceArea?: string
+  opensHour?: number
+  closesHour?: number
+  docs: TrustDoc[]
+  checks: TrustCheckRecord[]
+  checklist: Record<string, boolean>
+  history: TrustEvent[]
+  ngoId?: number | null // linked NGO record for recipients
+  submittedAt: number | null
+  decisionNote?: string
 }

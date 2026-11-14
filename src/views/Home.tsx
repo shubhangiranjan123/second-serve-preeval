@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, ArrowUpRight, Bike, Building2, ClipboardList, PackageCheck, Plus, Route, Tv } from 'lucide-react'
+import { AlertTriangle, ArrowRight, ArrowUpRight, Bike, Building2, ClipboardList, PackageCheck, Route, ScanLine, Tv } from 'lucide-react'
 import type { AppState, Donation, TimelineKey } from '../types'
 import { assessFeasibility, formatClock, impactTotals, sameLocalDay } from '../lib/engine'
 import { DripUnderline, FallingDrop, Squiggle } from '../components/Art'
@@ -7,6 +7,7 @@ import type { View } from '../components/Sidebar'
 import { Garden } from '../components/Garden'
 import { CityMap } from '../components/CityMap'
 import { donorStreaks } from '../lib/streaks'
+import { operationalAlerts } from '../lib/alerts'
 import { useT } from '../lib/i18n'
 import { WasteCounter } from '../components/WasteCounter'
 
@@ -64,6 +65,8 @@ export function Home({
     .filter((x) => x.f.verdict !== 'Feasible')
     .sort((a, b) => a.f.spareMin - b.f.spareMin)
 
+  const alerts = operationalAlerts(state, now)
+
   const activity = donations
     .flatMap((d) => d.timeline.map((t) => ({ ...t, d })))
     .sort((a, b) => b.at - a.at)
@@ -118,7 +121,7 @@ export function Home({
           </p>
           <div className="room-actions">
             <button className="btn btn-ink btn-lg" onClick={onAdd}>
-              <Plus size={18} /> {t('List surplus food')}
+              <ScanLine size={18} /> {t('Scan & donate')}
             </button>
             <button className="btn btn-outline-ink btn-lg" onClick={() => onNavigate('live')}>
               <Tv size={18} /> {t('Put it on the big screen')}
@@ -194,6 +197,15 @@ export function Home({
         <CityMap state={state} now={now} replay={null} onOpen={onOpen} />
       </section>
 
+      {alerts.length > 0 && (
+        <section className="ops-alerts" aria-label={t('Operational alerts')}>
+          {alerts.map((a) => (
+            <button key={a.id} className={`ops-alert ops-${a.tone}`} onClick={() => onNavigate(a.go)}>
+              <AlertTriangle size={16} /> <span>{a.text}</span> <ArrowRight size={15} />
+            </button>
+          ))}
+        </section>
+      )}
       <section className="split">
         <div className="panel panel-blush">
           <div className="panel-head">

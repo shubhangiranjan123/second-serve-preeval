@@ -19,6 +19,7 @@ import { Receipt } from './Receipt'
 import { useT } from '../lib/i18n'
 import { Bud } from './Bud'
 import { runMatchingPipeline } from '../lib/pipeline'
+import { rescueGuide } from '../lib/guide'
 import { PipelineTrack, trackFor } from './PipelineTrack'
 import { RuleList } from './DonationForm'
 
@@ -31,9 +32,11 @@ type Props = {
   onClose: () => void
   onOpenImpact: () => void
   onApprove?: (d: Donation) => void
+  onAutoMatch?: (d: Donation, snapshot: AppState) => void
+  onNavigate?: (v: 'dispatch' | 'trust') => void
 }
 
-export function RescueFile({ donation: d, state, now, store, toast, onClose, onOpenImpact, onApprove }: Props) {
+export function RescueFile({ donation: d, state, now, store, toast, onClose, onOpenImpact, onApprove, onAutoMatch, onNavigate }: Props) {
   const { t } = useT()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
@@ -59,7 +62,7 @@ export function RescueFile({ donation: d, state, now, store, toast, onClose, onO
 
   // Engine 2 (4-stage pipeline). Runs only for listings that are on the board.
   const pipeline = useMemo(
-    () => (d.status === 'Available' ? runMatchingPipeline(d, state, now) : null),
+    () => (d.status === 'Available' ? runMatchingPipeline(d, state, now, state.weights) : null),
     [d, state, now],
   )
   const sc = d.screening
@@ -98,10 +101,36 @@ export function RescueFile({ donation: d, state, now, store, toast, onClose, onO
             {d.storage === 'Ambient' ? <Clock size={14} /> : <Snowflake size={14} />} {t(d.storage)}
           </span>
           <span className="fact"><MapPin size={14} /> {d.address}</span>
+          {(() => {
+            const donorApp = (state.applications ?? []).find((a) => a.role === 'donor' && a.orgName.trim().toLowerCase() === d.donor.trim().toLowerCase())
+            return donorApp ? (
+              <span className={cx('fact', 'donor-trust')} title={t('TrustCheck status of this donor')}>
+                <ShieldCheck size={14} /> {donorApp.status === 'Verified' ? t('Verified donor') : t('Donor: {s}', { s: t(donorApp.status) })}
+              </span>
+            ) : null
+          })()}
         </div>
         {d.description && <p className="drawer-desc">{d.description}</p>}
 
         <div className="drawer-body">
+          {(() => {
+            const g = rescueGuide(d, state, now, pipeline)
+            return (
+              <section className={cx('guide', `guide-${g.tone}`)} aria-live="polite">
+                <span className="guide-kicker">{t('Next step')} · {t('rescue guide (rules, not AI)')}</span>
+                <strong>{g.next}</strong>
+                {g.why && <p>{g.why}</p>}
+                {g.warnings.length > 0 && (
+                  <ul>
+                    {g.warnings.map((w) => (
+                      <li key={w}>{w}</li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            )
+          })()}
+
           {(sc || d.status === 'In review') && <PipelineTrack states={trackFor(d, pipeline)} compact />}
 
           {/* 00 — AI verification (Engine 1), only for scanned listings */}
@@ -109,7 +138,14 @@ export function RescueFile({ donation: d, state, now, store, toast, onClose, onO
             <section className={cx('step', 'step-ai', d.status === 'In review' && 'step-review')}>
               <div className="step-label"><span>00</span> {t('AI food check')}</div>
               <div className="ai-summary">
-                {sc.photo ? <img src={sc.photo} alt={t('Donor photo')} /> : <span className="ai-thumb-empty" />}
+                {(() => {
+                  const imgs = sc.photos?.length ? sc.photos : sc.photo ? [sc.photo] : []
+                  return (
+                    <div className={cx('ai-thumbs', `n${Math.max(1, Math.min(4, imgs.length))}`)}>
+                      {imgs.length ? imgs.map((src, i) => <img key={i} src={src} alt={t('Donor photo {n}', { n: i + 1 })} />) : <span className="ai-thumb-empty" />}
+                    </div>
+                  )
+                })()}
                 <div>
                   <span className={cx('visual-verdict', `vv-${sc.visual.replace(/\s/g, '-').toLowerCase()}`)}>{t(sc.visual)}</span>
                   <strong>
@@ -205,9 +241,25 @@ export function RescueFile({ donation: d, state, now, store, toast, onClose, onO
                 <MatchPanel
                   pipeline={pipeline}
                   scanKey={d.id}
-                  onReserve={(e) => {
-                    store.reserve(d.id, e.ngo.id, e.score)
-                    toast(t('Reserved for {name}. Now assign a runner.', { name: e.ngo.name }))
+                  onReserve={(c) => {
+                    store.reserve(d.id, c.e.ngo.id, c.score)
+                    toast(t('Reserved for {name}. Now assign a runner.', { name: c.e.ngo.name }))
+                  }}
+                  onWeights={(w) => {
+                    store.setWeights(w)
+                    toast(w ? t('Custom weights applied to all matching.') : t('Default weights restored.'), 'info')
+                  }}
+                  onHint={(h) => {
+                    if (!h.action) return
+                    if (h.action.kind === 'runners') return onNavigate?.('dispatch')
+                    if (h.action.kind === 'trust') return onNavigate?.('trust')
+                    const child = store.splitDonation(d.id, h.action.servings)
+                    if (!child) return toast(t('Couldn’t split this listing.'), 'warn')
+                    toast(t('Split {n} servings into a new listing.', { n: child.servings }), 'info')
+                    onAutoMatch?.(child, {
+                      ...state,
+                      donations: [child, ...state.donations.map((x) => (x.id === d.id ? { ...x, servings: x.servings - child.servings } : x))],
+                    })
                   }}
                 />
               )

@@ -36,6 +36,10 @@ export type FoodScan = {
   confidence: { overall: number; identification: number; condition: number }
   reviewNotes: string[]
   description: string
+  photoQuality: 'good' | 'fair' | 'poor'
+  qualityIssues: string[]
+  samePhotoSet: boolean // all photos plausibly show the same donation
+  inconsistencies: string[] // disagreements between photos
 }
 
 export type ScanMeta = {
@@ -43,6 +47,7 @@ export type ScanMeta = {
   model: string
   latencyMs: number
   imageBytes: number
+  photos: number
   inference: 'live'
   at: string
 }
@@ -54,6 +59,8 @@ export type ScanResponse = ScanSuccess | ScanFailure
 export type VisionHealth = { configured: boolean; provider: string | null; model: string | null; reason: string | null }
 
 export const UPLOAD = {
+  minPhotos: 1, // 1 photo required, up to 3 more optional
+  maxPhotos: 4,
   maxInputBytes: 15 * 1024 * 1024, // what we accept from the camera roll before shrinking
   types: ['image/jpeg', 'image/png', 'image/webp'],
   maxSide: 1024, // long edge sent to the model
@@ -118,16 +125,20 @@ const FRIENDLY: Record<string, string> = {
   PROVIDER_AUTH: 'The server’s AI key was rejected by the provider.',
   PROVIDER_RATE_LIMIT: 'The AI provider is rate-limiting us. Try again shortly.',
   RATE_LIMITED: 'Too many scans in a minute. Try again shortly.',
+  PROVIDER_BUSY: 'Google’s AI is overloaded right now. Wait a few seconds and press Try again.',
   PROVIDER_ERROR: 'The AI provider had an error on its side.',
   INVALID_RESPONSE: 'The AI returned something we couldn’t read.',
   NETWORK: 'Couldn’t reach the SECOND-SERVE AI backend. Is it running (npm run dev)?',
+  TOO_FEW_PHOTOS: 'Add at least 1 photo of the food.',
+  TOO_MANY_PHOTOS: 'Use at most 4 photos for one donation.',
 }
 
 export function friendlyError(e: ScanFailure['error']) {
   return FRIENDLY[e.code] ?? e.message
 }
 
-export async function scanFood(dataUrl: string, signal?: AbortSignal): Promise<ScanResponse> {
+/** Send 1–4 photos of ONE donation. They are analysed together, as one piece of evidence. */
+export async function scanFood(images: string[], signal?: AbortSignal): Promise<ScanResponse> {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), UPLOAD.clientTimeoutMs)
   signal?.addEventListener('abort', () => ctrl.abort())
@@ -135,7 +146,7 @@ export async function scanFood(dataUrl: string, signal?: AbortSignal): Promise<S
     const res = await fetch('/api/food-scan', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ image: dataUrl }),
+      body: JSON.stringify({ images }),
       signal: ctrl.signal,
     })
     const body = (await res.json().catch(() => null)) as ScanResponse | null

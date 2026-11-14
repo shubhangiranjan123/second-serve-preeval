@@ -49,7 +49,7 @@ export type DonorFacts = {
 }
 
 export type ScanInput =
-  | { kind: 'scan'; scan: FoodScan }
+  | { kind: 'scan'; scan: FoodScan; photoCount?: number }
   | { kind: 'error'; message: string } // the AI could not run
   | { kind: 'none' } // ordinary manual listing (no AI step)
 
@@ -136,7 +136,30 @@ function aiRules(input: ScanInput, d: DonorFacts): RuleCheck[] {
   if (s.packaging === 'open' && d.packaging === 'Sealed')
     out.push({ id: 'ai-packaging', label: 'Packaging matches photo', status: 'warn', blocking: true, source: 'AI vision', detail: 'You marked it sealed, but the food looks uncovered in the photo.' })
 
-  // 7. Quantity sanity (advisory).
+  // 7. Photo quality: blurry/dark photos can't support a visual check.
+  const issues = s.qualityIssues.length ? ` (${s.qualityIssues.join(', ')})` : ''
+  if (s.photoQuality === 'poor')
+    out.push({ id: 'ai-quality', label: 'Photo quality', status: 'warn', blocking: true, source: 'AI vision', detail: `The photos are too unclear to judge the food${issues}. Retake them, or a person must inspect it.` })
+  else if (s.photoQuality === 'fair')
+    out.push({ id: 'ai-quality', label: 'Photo quality', status: 'warn', source: 'AI vision', detail: `Usable, but not ideal${issues}.` })
+  else out.push({ id: 'ai-quality', label: 'Photo quality', status: 'pass', source: 'AI vision', detail: 'Photos are clear enough to read.' })
+
+  // 8. All photos must show the same donation.
+  const n = input.photoCount ?? 1
+  if (n >= 2) {
+    if (!s.samePhotoSet || s.inconsistencies.length > 0)
+      out.push({
+        id: 'ai-photo-set',
+        label: 'Photos show one donation',
+        status: 'warn',
+        blocking: true,
+        source: 'AI vision',
+        detail: `The ${n} photos may not show the same food${s.inconsistencies.length ? `: ${s.inconsistencies.join('; ')}` : ''}. A person must check before it's listed as one donation.`,
+      })
+    else out.push({ id: 'ai-photo-set', label: 'Photos show one donation', status: 'pass', source: 'AI vision', detail: `All ${n} photos appear to show the same donation.` })
+  }
+
+  // 9. Quantity sanity (advisory).
   const est = s.quantity.inferable ? s.quantity.servings : null
   if (est && d.servings > est * SAFETY_POLICY.quantityOverstatement)
     out.push({ id: 'ai-quantity', label: 'Quantity looks plausible', status: 'warn', source: 'AI vision', detail: `You listed ${d.servings} servings; the photo suggests about ${est}. Make sure the photo shows all of it.` })

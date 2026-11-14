@@ -8,8 +8,10 @@ import { PROVIDERS, resolveProvider } from './providers.mjs'
 import { ScanError, normalizeScan } from './scanSchema.mjs'
 
 export const LIMITS = {
-  maxBodyBytes: 6 * 1024 * 1024, // JSON envelope incl. base64 overhead
-  maxImageBytes: 4 * 1024 * 1024, // decoded image
+  maxBodyBytes: 18 * 1024 * 1024, // JSON envelope: up to 4 photos incl. base64 overhead
+  maxImageBytes: 4 * 1024 * 1024, // per decoded photo (the browser sends ~150–400 KB)
+  minPhotos: 1,
+  maxPhotos: 4,
   minImageBytes: 2 * 1024, // smaller than this is not a usable photo
   ratePerMinute: 12, // per client IP
 }
@@ -71,7 +73,7 @@ function readBody(req, limit) {
   })
 }
 
-const RETRYABLE = new Set(['TIMEOUT', 'PROVIDER_UNREACHABLE', 'PROVIDER_ERROR', 'PROVIDER_RATE_LIMIT', 'INVALID_RESPONSE', 'RATE_LIMITED'])
+const RETRYABLE = new Set(['PROVIDER_BUSY', 'TIMEOUT', 'PROVIDER_UNREACHABLE', 'PROVIDER_ERROR', 'PROVIDER_RATE_LIMIT', 'INVALID_RESPONSE', 'RATE_LIMITED'])
 
 export function createApiHandler(cfg, { fetchImpl = fetch, clock = Date.now } = {}) {
   const hits = new Map() // ip -> timestamps within the last minute
@@ -118,7 +120,26 @@ export function createApiHandler(cfg, { fetchImpl = fetch, clock = Date.now } = 
           if (e instanceof ScanError) throw e
           throw new ScanError('BAD_REQUEST', 'Body must be JSON', 400)
         }
-        const image = parseImage(body?.image)
+        // One donation = 1–4 photos ("images"). A single "image" is still
+        // accepted for older clients and scripts.
+        let images
+        if (Array.isArray(body?.images)) {
+          if (body.images.length < LIMITS.minPhotos)
+            throw new ScanError('TOO_FEW_PHOTOS', `Add at least ${LIMITS.minPhotos} photo of the food`, 400)
+          if (body.images.length > LIMITS.maxPhotos)
+            throw new ScanError('TOO_MANY_PHOTOS', `Use at most ${LIMITS.maxPhotos} photos per donation`, 400)
+          images = body.images.map((img, i) => {
+            try {
+              return parseImage(img)
+            } catch (e) {
+              if (e instanceof ScanError) throw new ScanError(e.code, `Photo ${i + 1}: ${e.message}`, e.status)
+              throw e
+            }
+          })
+        } else {
+          images = [parseImage(body?.image)]
+        }
+        const image = { images, bytes: images.reduce((s, x) => s + x.bytes, 0) }
 
         const started = clock()
         const { raw, model } = await PROVIDERS[provider].scan(image, cfg, fetchImpl)
@@ -126,7 +147,7 @@ export function createApiHandler(cfg, { fetchImpl = fetch, clock = Date.now } = 
         return send(res, 200, {
           ok: true,
           scan,
-          meta: { provider, model, latencyMs: clock() - started, imageBytes: image.bytes, inference: 'live', at: new Date(clock()).toISOString() },
+          meta: { provider, model, latencyMs: clock() - started, imageBytes: image.bytes, photos: images.length, inference: 'live', at: new Date(clock()).toISOString() },
         })
       }
 

@@ -19,6 +19,7 @@ export const CONCERN_KINDS = [
 export const SEVERITIES = ['low', 'medium', 'high']
 export const PACKAGING = ['sealed', 'covered', 'open', 'unclear']
 export const UNITS = ['servings', 'boxes', 'items', 'kg']
+export const QUALITY = ['good', 'fair', 'poor']
 
 export const SCAN_PROMPT = `You are the visual screening step of SECOND-SERVE, a platform that redistributes surplus food from restaurants to NGOs and shelters in India.
 
@@ -36,7 +37,11 @@ Return JSON with:
 - quantity: set inferable=true only if you can reasonably count or estimate it; give servings and/or amount+unit (servings, boxes, items, kg) and a short basis for the estimate. Otherwise inferable=false, servings=0, amount=0, unit="none".
 - confidence: numbers from 0 to 1 for overall, identification (what the food is) and condition (visible state).
 - reviewNotes: anything a human inspector should double-check.
-- description: one or two plain sentences for the listing, describing only what is visible (no safety claims).`
+- description: one or two plain sentences for the listing, describing only what is visible (no safety claims).
+- photoQuality: "good" (sharp, well lit, food clearly visible), "fair" (usable but imperfect) or "poor" (too blurry, dark, far away or obstructed to judge the food).
+- qualityIssues: short list of problems with the photos, e.g. "blurry", "too dark", "food partly hidden", "glare on lid". Empty if none.
+- samePhotoSet: true if all photos plausibly show the same donation; false if they seem to show different food, places or batches.
+- inconsistencies: anything that disagrees between photos (e.g. "photo 1 shows rice, photo 3 shows bread"). Empty if none.`
 
 // JSON Schema shared by both providers (Gemini responseJsonSchema / Claude tool input_schema).
 export const SCAN_JSON_SCHEMA = {
@@ -85,6 +90,10 @@ export const SCAN_JSON_SCHEMA = {
     },
     reviewNotes: { type: 'array', items: { type: 'string' } },
     description: { type: 'string' },
+    photoQuality: { type: 'string', enum: QUALITY },
+    qualityIssues: { type: 'array', items: { type: 'string' } },
+    samePhotoSet: { type: 'boolean' },
+    inconsistencies: { type: 'array', items: { type: 'string' } },
   },
   required: [
     'isFood',
@@ -99,6 +108,10 @@ export const SCAN_JSON_SCHEMA = {
     'confidence',
     'reviewNotes',
     'description',
+    'photoQuality',
+    'qualityIssues',
+    'samePhotoSet',
+    'inconsistencies',
   ],
 }
 
@@ -182,5 +195,11 @@ export function normalizeScan(raw) {
     },
     reviewNotes: Array.isArray(raw.reviewNotes) ? raw.reviewNotes.map((s) => str(s, 200)).filter(Boolean).slice(0, 6) : [],
     description: str(raw.description, 300),
+    // Missing quality fields are treated conservatively: unknown quality is
+    // "fair" (advisory), but an unanswered same-donation check counts as "no".
+    photoQuality: oneOf(raw.photoQuality, QUALITY, 'fair'),
+    qualityIssues: Array.isArray(raw.qualityIssues) ? raw.qualityIssues.map((x) => str(x, 80)).filter(Boolean).slice(0, 6) : [],
+    samePhotoSet: raw.samePhotoSet === true,
+    inconsistencies: Array.isArray(raw.inconsistencies) ? raw.inconsistencies.map((x) => str(x, 160)).filter(Boolean).slice(0, 6) : [],
   }
 }

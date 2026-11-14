@@ -148,7 +148,7 @@ export function createInitialNgos(): Ngo[] {
       name: 'Roti Bank Manimajra',
       type: 'Food bank',
       ...at('Manimajra'),
-      verification: 'Pending',
+      verification: 'Under Review',
       refrigeration: true,
       freezer: false,
       acceptsNonVeg: true,

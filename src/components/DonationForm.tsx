@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
-import { AlertTriangle, Check, CircleDashed, Loader2, Sparkles, Wand2, X, XCircle } from 'lucide-react'
+import { AlertTriangle, Check, CircleDashed, Loader2, Sparkles, X, XCircle } from 'lucide-react'
 import type { AppState, Category, Diet, Donation, Packaging, RuleCheck, Screening, StorageType } from '../types'
 import { AREAS, CATEGORIES, defaultsFor, findArea } from '../data/demoData'
 import { MIN, assessFeasibility, matchNgos } from '../lib/engine'
@@ -48,31 +48,14 @@ const EMPTY: FormState = {
   packaging: '',
 }
 
-const SAMPLE: FormState = {
-  name: 'Chole kulche & jeera rice',
-  donor: 'Saffron Courtyard Hotel',
-  category: 'Meals',
-  servings: '35',
-  quantity: '35',
-  unit: 'servings',
-  area: 'Sector 17',
-  address: 'Service gate, SCO 61, Sector 17-C',
-  storage: 'Chilled',
-  diet: 'Veg',
-  description: 'Conference-lunch surplus, untouched. Packed in sealed foil trays at 1:45 pm.',
-  prepMinutes: '15',
-  travelEstimate: '20',
-  safeHours: '3',
-  cookedAgo: '60',
-  packaging: 'Sealed',
-}
-
 const CHECKLIST = [
   'Kept hot or chilled since cooking — never left out at room temperature',
   'Packed in clean, covered, food-grade containers',
   'Not served to guests or plated before',
   'Allergens (nuts, dairy, gluten) noted in the description',
 ]
+
+const CHECKS_KEY = 'second-serve-checklist-draft'
 
 const PACKAGING_FROM_AI: Record<string, Packaging | ''> = { sealed: 'Sealed', covered: 'Covered', open: 'Open', unclear: '' }
 
@@ -177,17 +160,32 @@ export function DonationForm({
   now: number
   onClose: () => void
   onSubmit: (input: NewDonationInput, extras?: ScreenedExtras) => void
-  scanned?: ScanHandoff
+  scanned: ScanHandoff // every listing starts from a photo scan (or its no-AI fallback)
   onRescan?: () => void
 }) {
   const { t } = useT()
   const initial = useMemo(() => prefillFrom(scanned), [scanned])
   const [f, setF] = useState<FormState>(initial.form)
-  const [checks, setChecks] = useState<boolean[]>(CHECKLIST.map(() => false))
+  // Checklist ticks survive closing/reopening the form (cleared on publish).
+  const [checks, setChecks] = useState<boolean[]>(() => {
+    try {
+      const saved: unknown = JSON.parse(sessionStorage.getItem(CHECKS_KEY) ?? 'null')
+      if (Array.isArray(saved) && saved.length === CHECKLIST.length && saved.every((v) => typeof v === 'boolean')) return saved
+    } catch {
+      /* corrupt or blocked storage: start unticked */
+    }
+    return CHECKLIST.map(() => false)
+  })
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(CHECKS_KEY, JSON.stringify(checks))
+    } catch {
+      /* storage blocked: ticks just won't persist */
+    }
+  }, [checks])
   const [touched, setTouched] = useState(false)
   const [busy, setBusy] = useState(false)
   const suggested = initial.suggested
-  const scanMode = scanned !== undefined
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
@@ -215,13 +213,13 @@ export function DonationForm({
   if (!(safeHours > 0 && safeHours <= 48)) errors.safeHours = 'Up to 48 h'
   if (!f.address.trim()) errors.address = 'Where should the runner go?'
   if (f.cookedAgo.trim() !== '' && !(cookedAgo >= 0 && cookedAgo <= 72 * 60)) errors.cookedAgo = '0–4320 min'
-  else if (scanMode && f.cookedAgo.trim() === '') errors.cookedAgo = 'When was it cooked or prepared?'
-  if (scanMode && !f.packaging) errors.packaging = 'How is it packed?'
+  else if (f.cookedAgo.trim() === '') errors.cookedAgo = 'When was it cooked or prepared?'
+  if (!f.packaging) errors.packaging = 'How is it packed?'
   if (!checks.every(Boolean)) errors.checks = 'Confirm every safe-handling point'
 
   // Engine 1, step 2: rules run live on every keystroke.
   const scanInput: ScanInput =
-    !scanned ? { kind: 'none' } : scanned.kind === 'scan' ? { kind: 'scan', scan: scanned.scan } : { kind: 'error', message: scanned.message }
+    scanned.kind === 'scan' ? { kind: 'scan', scan: scanned.scan, photoCount: scanned.thumbs.length } : { kind: 'error', message: scanned.message }
   const verification = verifyDonation(scanInput, {
     name: f.name,
     category: f.category,
@@ -303,7 +301,7 @@ export function DonationForm({
     const extras: ScreenedExtras = {}
     if (f.cookedAgo.trim() !== '') extras.preparedAt = now - Math.round(cookedAgo) * MIN
     if (f.packaging) extras.packaging = f.packaging
-    if (scanned && (verification.outcome === 'pass' || verification.outcome === 'review')) {
+    if (verification.outcome === 'pass' || verification.outcome === 'review') {
       const screening: Screening = {
         outcome: verification.outcome,
         visual: verification.visual,
@@ -328,18 +326,23 @@ export function DonationForm({
             : null,
         aiError: scanned.kind === 'error' ? scanned.message : undefined,
         edited: editedFields(suggested, { ...f, servings: f.servings, quantity: f.quantity }),
-        photo: scanned.thumb,
+        photo: scanned.thumbs[0],
+        photos: scanned.thumbs,
       }
       extras.screening = screening
+    }
+    try {
+      sessionStorage.removeItem(CHECKS_KEY)
+    } catch {
+      /* ignore */
     }
     setTimeout(() => onSubmit(input, extras), 450)
   }
 
   const err = (k: keyof typeof errors) => (touched && errors[k] ? <span className="field-err">{errors[k]}</span> : null)
   const outcome = OUTCOME_COPY[verification.outcome]
-  const submitLabel = !scanMode
-    ? t('List & find matches')
-    : verification.outcome === 'review'
+  const submitLabel =
+    verification.outcome === 'review'
       ? t('Send for review')
       : verification.outcome === 'reject'
         ? t('Can’t publish')
@@ -360,25 +363,13 @@ export function DonationForm({
       >
         <header className="modal-head">
           <div>
-            <span className="drawer-kicker">{scanMode ? t('Scan & donate') : t('New listing')}</span>
+            <span className="drawer-kicker">{t('Scan & donate')}</span>
             <h2>
-              {scanMode ? t('Check the details') : <>{t('List surplus')} <em>{t('food')}</em></>}
+              {t('Check the details')}
             </h2>
           </div>
           <div className="modal-head-actions">
-            {!scanMode && (
-              <button
-                type="button"
-                className="btn btn-ghost btn-sm"
-                onClick={() => {
-                  setF(SAMPLE)
-                  setChecks(CHECKLIST.map(() => true))
-                }}
-              >
-                <Wand2 size={14} /> {t('Fill sample')}
-              </button>
-            )}
-            {scanMode && onRescan && (
+            {onRescan && (
               <button type="button" className="btn btn-ghost btn-sm" onClick={onRescan}>
                 {t('Retake photo')}
               </button>
@@ -391,13 +382,15 @@ export function DonationForm({
 
         <div className="form-grid">
           <div className="form-fields">
-            {scanned && (
+            {(
               <section className={cx('ai-reading', !ai && 'ai-reading-off')} aria-label={t('AI reading')}>
-                {scanned.thumb ? <img src={scanned.thumb} alt="" /> : <span className="ai-thumb-empty" />}
+                <div className={cx('ai-thumbs', `n${Math.min(4, scanned.thumbs.length)}`)}>
+                  {scanned.thumbs.length ? scanned.thumbs.map((th, i) => <img key={i} src={th} alt={t('Photo {n}', { n: i + 1 })} />) : <span className="ai-thumb-empty" />}
+                </div>
                 {ai ? (
                   <div>
                     <span className="ai-reading-kicker">
-                      <Sparkles size={13} /> {t('What the AI sees')} · {ai.meta.model}
+                      <Sparkles size={13} /> {scanned.thumbs.length === 1 ? t('What the AI sees') : t('What the AI sees in {n} photos', { n: scanned.thumbs.length })} · {ai.meta.model}
                     </span>
                     <strong>{ai.scan.dishName || t('Unidentified food')}</strong>
                     {ai.scan.items.length > 0 && (
@@ -472,7 +465,7 @@ export function DonationForm({
                 <Segmented name="Storage" value={f.storage} options={['Ambient', 'Chilled', 'Frozen'] as const} onChange={(v) => set('storage', v)} />
               </div>
               <div className="field span-2">
-                <span>{t('Packaging')}{!scanMode && <em className="opt"> · {t('optional')}</em>}</span>
+                <span>{t('Packaging')}</span>
                 <Segmented name="Packaging" value={f.packaging as Packaging} options={['Sealed', 'Covered', 'Open'] as const} onChange={(v) => set('packaging', v)} />
                 {err('packaging')}
               </div>
@@ -481,7 +474,7 @@ export function DonationForm({
             <fieldset>
               <legend>{t('Timing')}</legend>
               <label className="field span-2">
-                <span>{t('Cooked or prepared')}{!scanMode && <em className="opt"> · {t('optional')}</em>}</span>
+                <span>{t('Cooked or prepared')}</span>
                 <div className="cooked-row">
                   <div className="input-suffix narrow"><input inputMode="numeric" value={f.cookedAgo} onChange={(e) => set('cookedAgo', e.target.value)} placeholder="60" /><em>{t('min ago')}</em></div>
                   {[30, 60, 120, 180].map((m) => (
@@ -564,10 +557,10 @@ export function DonationForm({
 
           <aside className="form-preview">
             <div className="preview-sticky">
-              {(scanMode || verification.outcome === 'reject') && (
+              {(
                 <div className={cx('screen-card', `screen-${verification.outcome}`)} aria-live="polite">
                   <span className="preview-label">{t('Safety screening')}</span>
-                  {scanMode && (
+                  {(
                     <span className={cx('visual-verdict', `vv-${verification.visual.replace(/\s/g, '-').toLowerCase()}`)}>
                       {t(verification.visual)}
                     </span>

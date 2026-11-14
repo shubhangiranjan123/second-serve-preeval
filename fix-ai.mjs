@@ -3,7 +3,7 @@
 //   node fix-ai.mjs
 //
 // 1. Reads (or asks for) your Gemini API key and keeps it in .env.
-// 2. Sets up 2–4 sample photos in public/samples/ for the scan screen.
+// 2. Sets up up to 4 sample photos in public/samples/ for the scan screen.
 // 3. Asks Google which models your key can use, tries them with the SAME
 //    request the app sends (real photo, real schema), and picks the first
 //    one that answers correctly and quickly.
@@ -98,7 +98,7 @@ if (sampleFiles.length === 0) {
 }
 sampleFiles = sampleFiles.slice(0, 4)
 writeFileSync(join(samplesDir, 'manifest.json'), JSON.stringify(sampleFiles.map((file, i) => ({ file, label: `Sample photo ${i + 1}` })), null, 2))
-if (sampleFiles.length === 0) warn('No photos found. Put 2–4 food photos (jpg/png) in public\\samples and run this again.')
+if (sampleFiles.length === 0) warn('No photos found. Put 1–4 food photos (jpg/png) in public\\samples and run this again.')
 else warn('Wrong photos? Delete them from public\\samples, add your own food photos there, and run this again.')
 
 // Test photo for the model check: first sample, else a tiny built-in image.
@@ -147,7 +147,13 @@ for (const model of candidates) {
   const t = Date.now()
   try {
     if (testPhoto) {
-      const { raw } = await geminiScan({ base64: testPhoto.toString('base64'), mimeType: testMime }, { GEMINI_API_KEY: key, GEMINI_MODEL: model, GEMINI_BASE_URL: base, timeoutMs: 25_000 })
+      // Same request shape as the app: 2 photos of one donation, analysed together.
+      const second = sampleFiles[1] ? readFileSync(join(samplesDir, sampleFiles[1])) : testPhoto
+      const images = [
+        { base64: testPhoto.toString('base64'), mimeType: testMime },
+        { base64: second.toString('base64'), mimeType: ({ '.png': 'image/png', '.webp': 'image/webp' }[extname(sampleFiles[1] ?? sampleFiles[0])] ?? 'image/jpeg') },
+      ]
+      const { raw } = await geminiScan({ images }, { GEMINI_API_KEY: key, GEMINI_MODEL: model, GEMINI_BASE_URL: base, timeoutMs: 30_000 })
       const scan = normalizeScan(raw)
       const secs = (Date.now() - t) / 1000
       ok(`${model} answered in ${secs.toFixed(1)} s → "${scan.dishName || 'unnamed'}" (${scan.category}, ${Math.round(scan.confidence.overall * 100)}% sure)`)
@@ -173,7 +179,12 @@ step('4/4  Saving settings')
 const next = { ...env, GEMINI_API_KEY: key, VISION_TIMEOUT_MS: '45000' }
 delete next.VISION_PROVIDER
 delete next.GEMINI_VERTEX
-if (chosen) next.GEMINI_MODEL = chosen
+if (chosen) {
+  next.GEMINI_MODEL = chosen
+  // Backups for when Google says the main model is busy (503).
+  next.GEMINI_FALLBACK_MODELS = candidates.filter((m) => m !== chosen).slice(0, 3).join(',')
+  if (next.GEMINI_FALLBACK_MODELS) ok(`Backup models if it's busy: ${next.GEMINI_FALLBACK_MODELS}`)
+}
 writeEnv(next)
 ok('.env saved')
 

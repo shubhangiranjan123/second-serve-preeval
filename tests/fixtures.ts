@@ -55,6 +55,10 @@ export function scan(over: Partial<FoodScan> = {}): FoodScan {
     confidence: { overall: 0.88, identification: 0.9, condition: 0.85 },
     reviewNotes: [],
     description: 'Four sealed foil trays of pulao and dal.',
+    photoQuality: 'good',
+    qualityIssues: [],
+    samePhotoSet: true,
+    inconsistencies: [],
     ...over,
   }
 }

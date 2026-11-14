@@ -1,4 +1,5 @@
-// Vision providers for Engine 1. Each adapter takes { base64, mimeType },
+// Vision providers for Engine 1. Each adapter takes { images: [{ base64, mimeType }] }
+// (1–4 photos of ONE donation; a single { base64, mimeType } is also accepted),
 // calls a real vision model and returns the model's raw JSON object.
 // normalizeScan() (scanSchema.mjs) then validates it.
 //
@@ -41,7 +42,14 @@ async function postJson(url, headers, body, timeoutMs, fetchImpl) {
   }
   if (!res.ok) {
     const badKey = /API_KEY_INVALID|API key not valid|UNAUTHENTICATED|PERMISSION_DENIED/i.test(text)
-    const code = res.status === 401 || res.status === 403 || badKey ? 'PROVIDER_AUTH' : res.status === 429 ? 'PROVIDER_RATE_LIMIT' : 'PROVIDER_ERROR'
+    const code =
+      res.status === 401 || res.status === 403 || badKey
+        ? 'PROVIDER_AUTH'
+        : res.status === 429
+          ? 'PROVIDER_RATE_LIMIT'
+          : res.status === 503 || /UNAVAILABLE|overloaded|high demand/i.test(text)
+            ? 'PROVIDER_BUSY'
+            : 'PROVIDER_ERROR'
     // Log the provider's detail server-side only; never echo keys or raw bodies to the browser.
     console.warn(`[food-scan] provider HTTP ${res.status}: ${text.slice(0, 300)}`)
     const err = new ScanError(code, `Vision provider returned HTTP ${res.status}`, res.status === 429 ? 429 : 502)
@@ -57,7 +65,17 @@ async function postJson(url, headers, body, timeoutMs, fetchImpl) {
 
 // ---------------------------------------------------------------- Gemini
 // Google AI Studio key (free tier available). Structured output via responseJsonSchema.
-export async function geminiScan({ base64, mimeType }, cfg, fetchImpl = fetch) {
+/** Normalise input to a list of photos. */
+export function photosOf(input) {
+  if (Array.isArray(input?.images)) return input.images
+  return [{ base64: input.base64, mimeType: input.mimeType }]
+}
+
+const photoLead = (n) =>
+  n > 1 ? `The ${n} photos below all show ONE surplus-food donation from different angles. Treat them together as evidence for that single donation.` : 'The photo below shows one surplus-food donation.'
+
+export async function geminiScan(input, cfg, fetchImpl = fetch) {
+  const photos = photosOf(input)
   const model = cfg.GEMINI_MODEL || 'gemini-2.5-flash'
   // AI Studio keys (both the old AIza… and the new AQ.Ab… format) use the
   // Gemini API. Set GEMINI_VERTEX=1 only for a Vertex AI express-mode key.
@@ -75,7 +93,16 @@ export async function geminiScan({ base64, mimeType }, cfg, fetchImpl = fetch) {
       ? { thinkingConfig: { thinkingLevel: 'low' } }
       : {}
   const request = (withSchema) => ({
-    contents: [{ role: 'user', parts: [{ inline_data: { mime_type: mimeType, data: base64 } }, { text: SCAN_PROMPT }] }],
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          { text: photoLead(photos.length) },
+          ...photos.map((p) => ({ inline_data: { mime_type: p.mimeType, data: p.base64 } })),
+          { text: SCAN_PROMPT },
+        ],
+      },
+    ],
     generationConfig: {
       temperature: 0.1,
       responseMimeType: 'application/json',
@@ -104,7 +131,8 @@ export async function geminiScan({ base64, mimeType }, cfg, fetchImpl = fetch) {
 
 // ---------------------------------------------------------------- Claude
 // Anthropic Messages API. A forced tool call gives schema-shaped JSON.
-export async function anthropicScan({ base64, mimeType }, cfg, fetchImpl = fetch) {
+export async function anthropicScan(input, cfg, fetchImpl = fetch) {
+  const photos = photosOf(input)
   const model = cfg.ANTHROPIC_MODEL || 'claude-haiku-5-5'
   const data = await postJson(
     'https://api.anthropic.com/v1/messages',
@@ -119,7 +147,8 @@ export async function anthropicScan({ base64, mimeType }, cfg, fetchImpl = fetch
         {
           role: 'user',
           content: [
-            { type: 'image', source: { type: 'base64', media_type: mimeType, data: base64 } },
+            { type: 'text', text: photoLead(photos.length) },
+            ...photos.map((p) => ({ type: 'image', source: { type: 'base64', media_type: p.mimeType, data: p.base64 } })),
             { type: 'text', text: SCAN_PROMPT },
           ],
         },
@@ -134,8 +163,43 @@ export async function anthropicScan({ base64, mimeType }, cfg, fetchImpl = fetch
   return { raw: extractJson(text), model }
 }
 
+// Busy/slow models are common on the free tier. Try the chosen model, retry
+// it once after a short pause if Google says it's overloaded, then fall back
+// to the other models listed in GEMINI_FALLBACK_MODELS. Every answer still
+// comes from a real model; nothing is substituted.
+const SWITCH_ON = new Set(['PROVIDER_BUSY', 'PROVIDER_RATE_LIMIT', 'TIMEOUT', 'PROVIDER_ERROR', 'INVALID_RESPONSE', 'PROVIDER_UNREACHABLE'])
+export async function geminiWithFallback(image, cfg, fetchImpl = fetch, sleep = (ms) => new Promise((r) => setTimeout(r, ms))) {
+  const primary = cfg.GEMINI_MODEL || 'gemini-2.5-flash'
+  const fallbacks = String(cfg.GEMINI_FALLBACK_MODELS || '')
+    .split(',')
+    .map((m) => m.trim())
+    .filter((m) => m && m !== primary)
+  const plan = [primary, primary, ...fallbacks].slice(0, 5)
+  const started = Date.now()
+  const budget = cfg.totalBudgetMs ?? 80_000
+  let last
+  for (let i = 0; i < plan.length; i++) {
+    const left = budget - (Date.now() - started)
+    if (left < 5_000) break
+    const model = plan[i]
+    const retrySame = i === 1
+    if (retrySame && !(last && (last.code === 'PROVIDER_BUSY' || last.code === 'PROVIDER_RATE_LIMIT'))) continue
+    if (retrySame) await sleep(1500)
+    try {
+      return await geminiScan(image, { ...cfg, GEMINI_MODEL: model, timeoutMs: Math.min(cfg.timeoutMs, left) }, fetchImpl)
+    } catch (err) {
+      last = err
+      if (!(err instanceof ScanError) || !SWITCH_ON.has(err.code)) throw err
+      console.warn(`[food-scan] ${model}: ${err.code}${i + 1 < plan.length ? ', trying next option' : ''}`)
+    }
+  }
+  if (last && last.code === 'PROVIDER_BUSY')
+    throw new ScanError('PROVIDER_BUSY', 'Google’s AI is overloaded right now. Wait a few seconds and press Try again.', 503)
+  throw last ?? new ScanError('PROVIDER_ERROR', 'No vision model answered', 502)
+}
+
 export const PROVIDERS = {
-  gemini: { scan: geminiScan, keyVar: 'GEMINI_API_KEY' },
+  gemini: { scan: geminiWithFallback, keyVar: 'GEMINI_API_KEY' },
   anthropic: { scan: anthropicScan, keyVar: 'ANTHROPIC_API_KEY' },
 }
 

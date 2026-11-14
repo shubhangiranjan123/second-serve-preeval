@@ -1,15 +1,16 @@
-import { BarChart3, Bike, Building2, Home, Map, Plus, ScanLine, Soup, Tv } from 'lucide-react'
+import { BarChart3, Bike, Building2, Home, Map, ScanLine, ShieldCheck, Soup, Tv } from 'lucide-react'
 import { Wordmark } from './Art'
 import { cx } from './ui'
 import { LANGS, useT } from '../lib/i18n'
 
-export type View = 'home' | 'board' | 'map' | 'ngos' | 'dispatch' | 'impact' | 'live'
+export type View = 'home' | 'board' | 'map' | 'ngos' | 'trust' | 'dispatch' | 'impact' | 'live'
 
 export const NAV: Array<{ id: View; label: string; short: string; Icon: typeof Soup }> = [
   { id: 'home', label: 'Home', short: 'Home', Icon: Home },
   { id: 'board', label: 'Rescue board', short: 'Board', Icon: Soup },
   { id: 'map', label: 'Live map', short: 'Map', Icon: Map },
   { id: 'ngos', label: 'NGO network', short: 'NGOs', Icon: Building2 },
+  { id: 'trust', label: 'TrustCheck', short: 'Trust', Icon: ShieldCheck },
   { id: 'dispatch', label: 'Runner dispatch', short: 'Runners', Icon: Bike },
   { id: 'impact', label: 'Impact', short: 'Impact', Icon: BarChart3 },
 ]
@@ -31,13 +32,11 @@ export function TopNav({
   view,
   onNavigate,
   counts,
-  onAdd,
   onScan,
 }: {
   view: View
   onNavigate: (v: View) => void
   counts: Partial<Record<View, number>>
-  onAdd: () => void
   onScan: () => void
 }) {
   const { t } = useT()
@@ -74,9 +73,6 @@ export function TopNav({
         <LangToggle />
         <button className="btn btn-ghost-light room-btn" onClick={() => onNavigate('live')}>
           <Tv size={16} /> <span>{t('Room wall')}</span>
-        </button>
-        <button className="btn btn-ghost-light scan-btn" onClick={onAdd} title={t('List surplus food')}>
-          <Plus size={17} /> <span>{t('List manually')}</span>
         </button>
         <button className="btn btn-pink" onClick={onScan}>
           <ScanLine size={17} /> <span>{t('Scan & donate')}</span>

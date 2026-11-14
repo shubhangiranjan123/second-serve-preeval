@@ -356,7 +356,8 @@ export function evaluateNgo(
   const reasons: string[] = []
   const warnings: string[] = []
 
-  if (ngo.verification !== 'Verified') failures.push('Not a verified partner yet (pending review)')
+  if (ngo.verification !== 'Verified')
+    failures.push(`Not a verified partner (${ngo.verification === 'Pending' ? 'pending review' : ngo.verification.toLowerCase()})`)
   if (!ngo.accepting) failures.push('Not accepting donations right now')
 
   const storage = storageCheck(donation.storage, ngo)

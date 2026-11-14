@@ -24,7 +24,7 @@ copy .env.example .env        # macOS/Linux: cp .env.example .env
 npm run dev
 ```
 
-**Easiest setup:** run `node fix-ai.mjs` once. It asks for your key if needed, picks a Gemini model your key can actually use (testing it with a real photo), sets up 2–4 sample photos in `public/samples`, and writes `.env`. Then `npm run dev`.
+**Easiest setup:** run `node fix-ai.mjs` once. It asks for your key if needed, picks a Gemini model your key can actually use (testing it with a real photo), sets up up to 4 sample photos in `public/samples`, and writes `.env`. Then `npm run dev`.
 
 `npm run dev` starts **two** things: the AI backend on port 8787 (holds the API key) and the app on **http://localhost:5173**. Vite forwards `/api` to the backend, so the key never reaches the browser.
 
@@ -44,6 +44,15 @@ macOS and Linux use the same commands.
 **Reset:** use **Reset demo data** in the footer. It restores the sample city with fresh, live deadlines. Do this right before you present.
 
 ---
+
+## 1b. Final build: what changed
+
+- **Scan-first listing.** Every donation starts with **Scan & donate**: 1 required photo (plus up to 3 optional) of one donation → AI reading → review and edit every field → safety screening → publish → automatic matching. The separate manual form is gone; if the AI is unavailable, *Continue without AI* sends the listing to a human check instead.
+- **Checklist blank-screen fix.** The hidden checkbox inside each safe-handling option was positioned relative to the whole modal, so focusing it made the browser scroll the modal itself out of view. Fixed in CSS (`.check { position: relative }`, `.form-modal { overflow: clip }`), plus an error boundary so no screen can ever go blank silently.
+- **Matching, explained.** Tabs in the rescue file: *Recommendation* (reasons, alternatives, how to make an unmatched rescue possible, e.g. split the quantity), *Gates* (all 7 gates × every NGO), *Score vs TOPSIS* (both rankings, why they differ, ±25 % sensitivity), *Weights* (adjustable, default 30/25/20/15/10).
+- **TrustCheck — Verified Rescue Network** (`#trust`): donor and recipient applications, six statuses, a review centre with official-portal links, check log, checklist, history and decisions. Only verified recipients pass matching gate 1. Demo applications are labelled DEMO DATA.
+- **Guide and alerts.** A *Next step* card on every rescue file and operational alerts on Home (deadlines, runner shortages, reviews waiting). Rules, not AI.
+- **Guards.** Duplicate listings within 10 min are blocked; a runner can't be double-booked.
 
 ## 2. Folder structure
 

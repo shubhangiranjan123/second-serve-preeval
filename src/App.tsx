@@ -12,6 +12,7 @@ import { cx } from './components/ui'
 import { Home } from './views/Home'
 import { RescueBoard } from './views/RescueBoard'
 import { NgoNetwork } from './views/NgoNetwork'
+import { Trust } from './views/Trust'
 import { Dispatch } from './views/Dispatch'
 import { Impact } from './views/Impact'
 import { Live } from './views/Live'
@@ -22,7 +23,7 @@ import { SPECIES, milestoneReached, MILESTONES } from './lib/garden'
 import { useT } from './lib/i18n'
 import type { AppState, Donation, RescueRecord } from './types'
 
-const VIEWS: View[] = ['home', 'board', 'map', 'ngos', 'dispatch', 'impact', 'live']
+const VIEWS: View[] = ['home', 'board', 'map', 'ngos', 'trust', 'dispatch', 'impact', 'live']
 
 function readHash(): View {
   const h = window.location.hash.replace('#', '') as View
@@ -110,9 +111,9 @@ export default function App() {
   // The coordinator can still release it from the rescue file.
   const autoMatch = useCallback(
     (d: Donation, snapshot: AppState) => {
-      const p = runMatchingPipeline(d, snapshot, Date.now())
+      const p = runMatchingPipeline(d, snapshot, Date.now(), snapshot.weights)
       if (p.recommended) {
-        store.reserve(d.id, p.recommended.e.ngo.id, p.recommended.e.score)
+        store.reserve(d.id, p.recommended.e.ngo.id, p.recommended.score)
         toast(t('Published and matched to {name}. Now assign a runner.', { name: p.recommended.e.ngo.name }))
       } else {
         toast(t('Published, but no organisation can take it in time. It stays on the board, unmatched.'), 'warn')
@@ -183,13 +184,14 @@ export default function App() {
   return (
     <div className="shell">
       <Grain />
-      <TopNav view={view} onNavigate={navigate} counts={counts} onAdd={() => { setScanned(undefined); setFormOpen(true) }} onScan={openScan} />
+      <TopNav view={view} onNavigate={navigate} counts={counts} onScan={openScan} />
 
       <main className={cx('content', view === 'home' && 'content-home')} key={view}>
-        {view === 'home' && <Home state={state} now={now} onAdd={() => setFormOpen(true)} onOpen={openFile} onNavigate={navigate} />}
-        {view === 'board' && <RescueBoard state={state} now={now} onAdd={() => { setScanned(undefined); setFormOpen(true) }} onScan={openScan} onOpen={openFile} />}
+        {view === 'home' && <Home state={state} now={now} onAdd={openScan} onOpen={openFile} onNavigate={navigate} />}
+        {view === 'board' && <RescueBoard state={state} now={now} onScan={openScan} onOpen={openFile} />}
         {view === 'map' && <MapView state={state} now={now} onOpen={openFile} />}
         {view === 'ngos' && <NgoNetwork state={state} now={now} />}
+        {view === 'trust' && <Trust state={state} store={store} toast={toast} />}
         {view === 'dispatch' && <Dispatch state={state} now={now} store={store} toast={toast} onOpen={openFile} />}
         {view === 'impact' && <Impact state={state} now={now} />}
       </main>
@@ -225,7 +227,7 @@ export default function App() {
         />
       )}
 
-      {formOpen && (
+      {formOpen && scanned && (
         <DonationForm
           key={scanned ? (scanned.kind === 'scan' ? scanned.meta.at : 'noscan') : 'manual'}
           state={state}
@@ -240,6 +242,10 @@ export default function App() {
             const created = store.addDonation(input, extras)
             setFormOpen(false)
             setScanned(undefined)
+            if (!created) {
+              toast(t('“{name}” from {donor} is already on the board. Open it there instead of listing it twice.', { name: input.name, donor: input.donor }), 'warn')
+              return
+            }
             if (!extras?.screening) {
               // Original manual flow, unchanged: open the file and let the coordinator pick.
               toast(t('“{name}” is on the board. Here are its matches.', { name: created.name }))
@@ -262,6 +268,8 @@ export default function App() {
           toast={toast}
           onClose={() => setOpenId(null)}
           onOpenImpact={() => navigate('impact')}
+          onAutoMatch={autoMatch}
+          onNavigate={(v) => navigate(v)}
           onApprove={(d) => {
             store.approveReview(d.id)
             const approved: Donation = { ...d, status: 'Available' }

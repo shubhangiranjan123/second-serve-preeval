@@ -18,12 +18,15 @@ import './styles.css'
 import './features.css'
 import './ai.css'
 import App from './App'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { LangProvider } from './lib/i18n'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <LangProvider>
-      <App />
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
     </LangProvider>
   </StrictMode>,
 )
