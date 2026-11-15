@@ -4,6 +4,7 @@ import type { AppState, Donation, RescueRecord } from '../types'
 import { formatClock } from '../lib/engine'
 import { DONOR_AREAS, findArea } from '../data/demoData'
 import { CityMap, project, type ReplayFrame, type ReplayItem } from '../components/CityMap'
+import { RealMap } from '../components/RealMap'
 import { Garden } from '../components/Garden'
 import { DemoBadge, Eyebrow } from '../components/ui'
 import { chime } from '../lib/sound'
@@ -110,6 +111,22 @@ export function useReplay(state: AppState, now: number) {
 export function MapView({ state, now, onOpen }: { state: AppState; now: number; onOpen: (d: Donation) => void }) {
   const { t } = useT()
   const replay = useReplay(state, now)
+  const [kind, setKind] = useState<'real' | 'drawn'>(() => {
+    try {
+      return localStorage.getItem('second-serve-map-kind') === 'drawn' ? 'drawn' : 'real'
+    } catch {
+      return 'real'
+    }
+  })
+  const pick = (k: 'real' | 'drawn') => {
+    setKind(k)
+    try {
+      localStorage.setItem('second-serve-map-kind', k)
+    } catch {
+      /* ignore */
+    }
+  }
+  const live = state.runners.filter((r) => r.gps && now - r.gps.at < 3 * 60_000).length
   const moving = state.donations.filter((d) => d.status === 'Reserved')
   const wilted = state.donations.filter((d) => d.status === 'Available' && d.safeUntil <= now)
   const revealUntil = replay.frame ? replay.frame.clock : undefined
@@ -124,14 +141,32 @@ export function MapView({ state, now, onOpen }: { state: AppState; now: number; 
             {t('The whole city,')} <em>{t('one glance.')}</em>
           </h1>
           <p className="view-lede">
-            {t('Every listing is a countdown ring. Every partner is a little house. Every rescue on the road is a firefly. Press replay to watch the last 24 hours draw themselves in 15 seconds.')}
+            {kind === 'real'
+              ? t('Real Chandigarh streets. Food waiting shows its safe time left, every rescue on the road follows the actual road route, and runners who share their phone’s GPS move live. Press replay to watch the last 24 hours draw themselves in 15 seconds.')
+              : t('Every listing is a countdown ring. Every partner is a little house. Every rescue on the road is a firefly. Press replay to watch the last 24 hours draw themselves in 15 seconds.')}
           </p>
         </div>
-        <DemoBadge>{t('Illustrated map · works offline')}</DemoBadge>
+        <div className="map-head-side">
+          <div className="map-switch" role="group" aria-label={t('Map style')}>
+            <button className={kind === 'real' ? 'on' : ''} onClick={() => pick('real')} aria-pressed={kind === 'real'}>
+              {t('Real streets')}
+            </button>
+            <button className={kind === 'drawn' ? 'on' : ''} onClick={() => pick('drawn')} aria-pressed={kind === 'drawn'}>
+              {t('Illustrated')}
+            </button>
+          </div>
+          <DemoBadge>
+            {kind === 'real'
+              ? live
+                ? t('{n} runner(s) sharing live GPS', { n: live })
+                : t('Demo runners: positions estimated')
+              : t('Illustrated map · works offline')}
+          </DemoBadge>
+        </div>
       </header>
 
       <div className="map-layout">
-        <CityMap state={state} now={now} replay={replay.frame} onOpen={onOpen} />
+        {kind === 'real' ? <RealMap state={state} now={now} replay={replay.frame} onOpen={onOpen} /> : <CityMap state={state} now={now} replay={replay.frame} onOpen={onOpen} />}
 
         <aside className="map-side">
           <div className="panel">
@@ -192,6 +227,33 @@ export function MapView({ state, now, onOpen }: { state: AppState; now: number; 
             )}
           </div>
 
+          {kind === 'real' ? (
+          <div className="panel">
+            <h3>{t('Legend')}</h3>
+            <ul className="map-legend">
+              <li>
+                <span className="legend-swatch"><span className="rm-food ok" style={{ height: 20, width: 34, fontSize: 10 }}>1:30</span></span>
+                {t('Food waiting · safe time left')}
+              </li>
+              <li>
+                <span className="legend-swatch"><span className="legend-line" /></span>
+                {t('Rescue on the road (real road route)')}
+              </li>
+              <li>
+                <span className="legend-swatch"><span className="legend-line lead" /></span>
+                {t('Runner heading to the pickup')}
+              </li>
+              <li>
+                <span className="legend-swatch"><span className="rm-ngo"><svg viewBox="0 0 24 24"><path d="M3 11 12 4l9 7v9H3z" /></svg></span></span>
+                {t('NGO (number = rescues today)')}
+              </li>
+              <li>
+                <span className="legend-swatch"><span className="rm-runner rm-live"><b>AS</b></span></span>
+                {t('Runner: solid = live GPS, dashed = estimated')}
+              </li>
+            </ul>
+          </div>
+          ) : (
           <div className="panel">
             <h3>{t('Legend')}</h3>
             <ul className="map-legend">
@@ -213,6 +275,7 @@ export function MapView({ state, now, onOpen }: { state: AppState; now: number; 
               </li>
             </ul>
           </div>
+          )}
         </aside>
       </div>
 

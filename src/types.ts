@@ -136,6 +136,7 @@ export type Runner = {
   lng: number
   onShift: boolean
   completed: number
+  gps?: { lat: number; lng: number; accuracy: number; at: number } // live location shared from the runner's phone
 }
 
 // Permanent record of one completed rescue. Written only when a job

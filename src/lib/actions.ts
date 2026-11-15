@@ -76,6 +76,8 @@ export type Action =
   | { type: 'ngoConfirmReceipt'; donationId: number }
   | { type: 'setAccepting'; ngoId: number; accepting: boolean }
   | { type: 'toggleShift'; runnerId: number }
+  | { type: 'runnerLocation'; runnerId: number; lat: number; lng: number; accuracy: number }
+  | { type: 'stopLocation'; runnerId: number }
   | { type: 'setWeights'; weights: MatchWeights | null }
   | { type: 'submitApplication'; draft: TrustApplication; asDraft?: boolean }
   | { type: 'reviewApplication'; id: number; action: ReviewAction; note?: string }
@@ -179,6 +181,10 @@ function authorize(a: Action, actor: Actor, s: AppState) {
       return
     case 'toggleShift':
       if (actor.role !== 'runner' || actor.runnerId !== a.runnerId) forbid('You can only change your own shift.')
+      return
+    case 'runnerLocation':
+    case 'stopLocation':
+      if (actor.role !== 'runner' || actor.runnerId !== a.runnerId) forbid('You can only share your own location.')
       return
     case 'assignRunner':
       if (actor.role !== 'runner' || actor.runnerId !== a.runnerId) forbid('Runners can only take runs for themselves.')
@@ -418,6 +424,16 @@ export function applyAction(s: AppState, a: Action, actor: Actor, now: number): 
       if (r.onShift && s.donations.some((d) => d.runnerId === r.id && d.status === 'Reserved')) fail('Finish or hand over the current run before going off shift.')
       return { state: { ...s, runners: s.runners.map((x) => (x.id === r.id ? { ...x, onShift: !x.onShift } : x)) }, result }
     }
+
+    case 'runnerLocation': {
+      // Real GPS from the runner's phone. Kept separate from the runner's home base.
+      if (!num(a.lat, -90, 90) || !num(a.lng, -180, 180) || !num(a.accuracy, 0, 100_000)) fail('That location doesn’t look valid.')
+      if (!s.runners.some((x) => x.id === a.runnerId)) fail('Unknown runner.')
+      const gps = { lat: Math.round(a.lat * 1e6) / 1e6, lng: Math.round(a.lng * 1e6) / 1e6, accuracy: Math.round(a.accuracy), at: now }
+      return { state: { ...s, runners: s.runners.map((x) => (x.id === a.runnerId ? { ...x, gps } : x)) }, result }
+    }
+    case 'stopLocation':
+      return { state: { ...s, runners: s.runners.map((x) => (x.id === a.runnerId ? { ...x, gps: undefined } : x)) }, result }
 
     case 'setWeights': {
       const next = { ...s }

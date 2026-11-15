@@ -8,7 +8,7 @@ import { capacityUsage, formatClock, hoursLabel, impactTotals } from '../../lib/
 import { useNow } from '../../App'
 import { useT } from '../../lib/i18n'
 import { cx } from '../../components/ui'
-import { BoardShell, SafeClock, Stat, Steps, TrustCard, photoOf, type Toast } from './shared'
+import { BoardShell, HeroArt, SafeClock, Stat, Steps, TrustCard, photoOf, type Toast } from './shared'
 
 const REASONS = ['No fridge space left today', 'We close before it would arrive', 'Can’t use this kind of food', 'Too much for us today']
 
@@ -23,6 +23,7 @@ export function NgoBoard({ store, state, user, toast }: { store: RescueStore; st
     return (
       <BoardShell store={store} user={user} toast={toast} kind={t('NGO board')}>
         <section className="bhero">
+        <HeroArt />
           <div>
             <h1>{user.name}</h1>
             <p>{t('Welcome. Food is only matched to verified organisations, so start with your TrustCheck application.')}</p>
@@ -46,6 +47,7 @@ export function NgoBoard({ store, state, user, toast }: { store: RescueStore; st
   return (
     <BoardShell store={store} user={user} toast={toast} kind={t('NGO board')}>
       <section className="bhero">
+        <HeroArt />
         <div>
           <h1>{ngo.name}</h1>
           <p>

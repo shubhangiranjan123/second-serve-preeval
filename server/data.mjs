@@ -166,7 +166,9 @@ export function createDataApi({ db, core, demo = true, coordinatorPin = DEMO_PIN
   }
 
   function commit(next, user, action, ok, detail) {
-    db.audit({ userId: user?.id, userName: user?.name, role: user?.role, action, target: detail?.target, ok, detail })
+    // GPS pings would flood the activity log; only failures of them are logged.
+    if (!(ok && (action === 'runnerLocation' || action === 'stopLocation')))
+      db.audit({ userId: user?.id, userName: user?.name, role: user?.role, action, target: detail?.target, ok, detail })
     if (!ok) return db.version()
     const version = db.saveDiff(state, next)
     state = next
@@ -199,6 +201,10 @@ export function createDataApi({ db, core, demo = true, coordinatorPin = DEMO_PIN
       }
       if (path === '/api/auth/accounts' && method === 'GET') {
         return json(res, 200, { ok: true, accounts: db.listUsers().map((u) => ({ id: u.id, role: u.role, name: u.name })), demoPins: demo ? DEMO_PINS : null })
+      }
+      if (path === '/api/public/pulse' && method === 'GET') {
+        // Anonymous city summary for the start screen: coordinates and counts only.
+        return json(res, 200, { ok: true, pulse: core.cityPulse(state, Date.now()) })
       }
       if (path === '/api/lan' && method === 'GET') {
         const addresses = Object.values(networkInterfaces())

@@ -8,7 +8,7 @@ import { formatClock, impactTotals } from '../../lib/engine'
 import { ScanFlow } from '../../components/ScanFlow'
 import { useNow } from '../../App'
 import { useT } from '../../lib/i18n'
-import { BoardShell, SafeClock, Stat, Steps, TrustCard, photoOf, type Toast } from './shared'
+import { BoardShell, HeroArt, SafeClock, Stat, Steps, TrustCard, photoOf, type Toast } from './shared'
 
 export function DonorBoard({ store, state, user, toast }: { store: RescueStore; state: AppState; user: User; toast: Toast }) {
   const { t } = useT()
@@ -25,6 +25,7 @@ export function DonorBoard({ store, state, user, toast }: { store: RescueStore; 
   return (
     <BoardShell store={store} user={user} toast={toast} kind={t('Donor board')}>
       <section className="bhero">
+        <HeroArt />
         <div>
           <h1>{me}</h1>
           <p>{live.length ? t('{n} listing(s) on their way. Updates arrive here live.', { n: live.length }) : t('Got surplus? Photograph it and we’ll find it a table.')}</p>

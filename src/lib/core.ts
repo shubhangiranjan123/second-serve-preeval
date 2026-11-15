@@ -3,3 +3,4 @@
 export { ActionError, applyAction, freshState, isState, withTrust } from './actions'
 export type { Action, Actor, Role } from './actions'
 export { runMatchingPipeline } from './pipeline'
+export { cityPulse } from './pulse'

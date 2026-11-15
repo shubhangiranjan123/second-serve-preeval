@@ -56,7 +56,7 @@ export function TopNav({
         <Wordmark />
       </a>
       <nav className="topnav-links" aria-label="Main navigation">
-        {NAV.slice(1).map(({ id, label }) => (
+        {NAV.slice(1).map(({ id, label, short }) => (
           <a
             key={id}
             href={`#${id}`}
@@ -67,7 +67,8 @@ export function TopNav({
               onNavigate(id)
             }}
           >
-            {t(label)}
+            <span className="nl-full">{t(label)}</span>
+            <span className="nl-short">{t(short)}</span>
             {counts[id] ? <em>{counts[id]}</em> : null}
           </a>
         ))}

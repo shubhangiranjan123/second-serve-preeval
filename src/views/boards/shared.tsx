@@ -6,7 +6,8 @@ import type { AppState, Donation, TrustApplication, TrustRole } from '../../type
 import type { RescueStore, User } from '../../lib/useRescueStore'
 import { formatClock, formatDuration, minutesBetween } from '../../lib/engine'
 import { blankApplication } from '../../lib/trust'
-import { Grain, Wordmark } from '../../components/Art'
+import { Drop, Grain, Wordmark } from '../../components/Art'
+import { WasteBar } from '../../components/WasteCounter'
 import { AccountMenu } from '../../components/AccountMenu'
 import { LangToggle } from '../../components/Sidebar'
 import { ApplicationForm, StatusChip } from '../Trust'
@@ -16,6 +17,12 @@ import { cx } from '../../components/ui'
 export type Toast = (msg: string, tone?: 'ok' | 'info' | 'warn') => void
 
 export function BoardShell({ store, user, toast, kind, children }: { store: RescueStore; user: User; toast: Toast; kind: string; children: ReactNode }) {
+  const { t } = useT()
+  const history = store.state?.history ?? []
+  const ticker = [...history]
+    .sort((a, b) => b.deliveredAt - a.deliveredAt)
+    .slice(0, 8)
+    .map((r) => `${t('{n} meals', { n: r.servings })} · ${r.food} → ${r.ngoName}`)
   return (
     <div className={cx('board-shell', `board-${user.role}`)}>
       <Grain />
@@ -27,8 +34,29 @@ export function BoardShell({ store, user, toast, kind, children }: { store: Resc
           <AccountMenu store={store} user={user} toast={toast} />
         </div>
       </header>
+      <WasteBar />
       <main className="board-main">{children}</main>
+      {ticker.length > 0 && (
+        <div className="marquee board-marquee" aria-label={t('Recent rescues across the city')}>
+          <div className="marquee-track">
+            {[...ticker, ...ticker].map((x, i) => (
+              <span key={i}>
+                {x} <i>●</i>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
+  )
+}
+
+/** Decoration for the coloured hero panel on each board. */
+export function HeroArt() {
+  return (
+    <span className="bhero-art" aria-hidden>
+      <Drop className="bhero-drop" size={210} />
+    </span>
   )
 }
 

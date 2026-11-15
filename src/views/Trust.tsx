@@ -74,7 +74,10 @@ export function Trust({ state, store, toast }: { state: AppState; store: RescueS
       </header>
 
       <p className="trust-note">
-        <b>{t('DEMO DATA')}</b> {t('Sample organisations and numbers are fictional. Portal checks are recorded by a person; nothing is verified automatically. This demo keeps applications in this browser only, with no login: it is not secure document storage.')}
+        <b>{t('DEMO DATA')}</b> {t('Sample organisations and numbers are fictional. Portal checks are recorded by a person; nothing is verified automatically.')}{' '}
+        {store.mode === 'server'
+          ? t('Applications and documents are stored on the SECOND-SERVE server behind sign-in. For real use, serve it over HTTPS.')
+          : t('Offline demo: applications stay in this browser only.')}
       </p>
 
       {tab === 'review' ? (

@@ -317,6 +317,8 @@ export function useRescueStore() {
     ngoConfirmReceipt: (donationId: number) => a({ type: 'ngoConfirmReceipt', donationId }),
     setAccepting: (ngoId: number, accepting: boolean) => a({ type: 'setAccepting', ngoId, accepting }),
     toggleShift: (runnerId: number) => a({ type: 'toggleShift', runnerId }),
+    shareLocation: (runnerId: number, lat: number, lng: number, accuracy: number) => a({ type: 'runnerLocation', runnerId, lat, lng, accuracy }),
+    stopLocation: (runnerId: number) => a({ type: 'stopLocation', runnerId }),
     setWeights: (weights: MatchWeights | null) => a({ type: 'setWeights', weights }),
     submitApplication: (draft: TrustApplication, asDraft = false) => a({ type: 'submitApplication', draft, asDraft }),
     reviewApplication: (id: number, action: ReviewAction, note?: string) => a({ type: 'reviewApplication', id, action, note }),

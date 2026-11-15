@@ -82,6 +82,29 @@ describe('Shared rules: roles and permissions', () => {
   })
 })
 
+describe('Live location and city pulse', () => {
+  test('a runner can share only their own GPS; bad coordinates are refused; stop clears it', () => {
+    const st = freshState(NOW)
+    const r = st.runners[0]
+    const me: Actor = { role: 'runner', name: r.name, runnerId: r.id }
+    const out = run(st, { type: 'runnerLocation', runnerId: r.id, lat: 30.74, lng: 76.78, accuracy: 12 }, me)
+    expect(out.state.runners[0].gps).toMatchObject({ lat: 30.74, lng: 76.78, accuracy: 12, at: NOW })
+    expectFail(() => run(st, { type: 'runnerLocation', runnerId: st.runners[1].id, lat: 30.74, lng: 76.78, accuracy: 12 }, me), 'FORBIDDEN')
+    expectFail(() => run(st, { type: 'runnerLocation', runnerId: r.id, lat: 200, lng: 76.78, accuracy: 12 }, me), 'INVALID')
+    expectFail(() => run(st, { type: 'runnerLocation', runnerId: r.id, lat: 30.7, lng: 76.7, accuracy: 12 }, { role: 'donor', name: 'x', donorName: 'x' }), 'FORBIDDEN')
+    expect(run(out.state, { type: 'stopLocation', runnerId: r.id }, me).state.runners[0].gps).toBeUndefined()
+  })
+  test('city pulse has coordinates and counts, never names', () => {
+    const st = freshState(NOW)
+    const p = core.cityPulse(st, NOW)
+    expect(p.mealsTotal).toBeGreaterThan(0)
+    const text = JSON.stringify(p)
+    for (const n of st.ngos) expect(text).not.toContain(n.name)
+    for (const r of st.runners) expect(text).not.toContain(r.name)
+    for (const d of st.donations) expect(text).not.toContain(d.donor)
+  })
+})
+
 describe('Shared rules: rescue flow', () => {
   test('publish → auto-match → runner → NGO confirms → delivered once, counted once', () => {
     let st = freshState(NOW)
@@ -207,6 +230,13 @@ describe('HTTP data API (real SQLite file)', () => {
     server.close()
     db.close()
     rmSync(dir, { recursive: true, force: true })
+  })
+
+  test('public pulse works signed out and carries no names', async () => {
+    const r = await call('/api/public/pulse')
+    expect(r.status).toBe(200)
+    expect(r.body.pulse.ngos.length).toBeGreaterThan(0)
+    expect(JSON.stringify(r.body)).not.toContain('Shelter')
   })
 
   test('seeded demo accounts; no data without signing in', async () => {

@@ -5,7 +5,9 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { ArrowLeft, Bike, Building2, ChefHat, Delete, LayoutDashboard, Search } from 'lucide-react'
 import type { Account, RescueStore } from '../lib/useRescueStore'
 import type { Role } from '../lib/actions'
-import { Grain, Wordmark } from '../components/Art'
+import { DripUnderline, FallingDrop, Grain, Wordmark } from '../components/Art'
+import { WasteCounter } from '../components/WasteCounter'
+import { NEXT_ROLE_KEY } from '../components/AccountMenu'
 import { LangToggle } from '../components/Sidebar'
 import { useT } from '../lib/i18n'
 import { cx } from '../components/ui'
@@ -21,7 +23,16 @@ export function Login({ store }: { store: RescueStore }) {
   const { t } = useT()
   const [all, setAll] = useState<Account[] | null>(null)
   const [loadErr, setLoadErr] = useState('')
-  const [role, setRole] = useState<Role | null>(null)
+  const [role, setRole] = useState<Role | null>(() => {
+    // arriving from "Switch board": open straight at that role's account list
+    try {
+      const r = sessionStorage.getItem(NEXT_ROLE_KEY)
+      sessionStorage.removeItem(NEXT_ROLE_KEY)
+      return r === 'donor' || r === 'ngo' || r === 'runner' || r === 'coordinator' ? r : null
+    } catch {
+      return null
+    }
+  })
   const [account, setAccount] = useState<Account | null>(null)
   const [pin, setPin] = useState('')
   const [q, setQ] = useState('')
@@ -96,12 +107,19 @@ export function Login({ store }: { store: RescueStore }) {
       </header>
 
       <section className="login-hero">
-        <h1>
-          {t('Every plate')}
-          <br />
-          {t('has a route.')}
-        </h1>
-        <p>{server ? t('Sign in to your board. Every screen updates live as food moves from kitchen to shelter.') : t('Offline demo: no server found, so data stays in this browser. Pick who you want to be.')}</p>
+        <p className="lw-lead">{t('Since you opened this page, India has thrown away')}</p>
+        <div className="lw-number">
+          <strong>
+            <WasteCounter /> kg
+          </strong>
+          <DripUnderline />
+          <FallingDrop />
+          <FallingDrop className="fd-2" delay={1.3} />
+        </div>
+        <p className="lw-tail">
+          {t('of food. Every plate has a route.')} <b>{t('Pick your board and give it one.')}</b>
+        </p>
+        <p className="lw-mode">{server ? t('Sign in to your board. Every screen updates live as food moves from kitchen to shelter.') : t('Offline demo: no server found, so data stays in this browser. Pick who you want to be.')}</p>
       </section>
 
       <section className="login-panel">
@@ -122,6 +140,7 @@ export function Login({ store }: { store: RescueStore }) {
             <button className="link-back" onClick={() => setRole(null)}>
               <ArrowLeft size={16} /> {t('Choose a different role')}
             </button>
+            <span className={cx('login-role-tag', `role-${role}`)}>{t(ROLES.find((x) => x.role === role)!.title)}</span>
             <h2>{t('Who are you?')}</h2>
             {loadErr && <p className="field-err">{loadErr}</p>}
             {(all?.filter((a) => a.role === role).length ?? 0) > 6 && (
@@ -136,7 +155,7 @@ export function Login({ store }: { store: RescueStore }) {
                   key={a.id}
                   onClick={() => {
                     setAccount(a)
-                    setPin('')
+                    setPin(store.demoPins?.[a.role] ?? '') // demo: PIN pre-filled, one tap to sign in
                     setError('')
                     if (!server) go(a, '')
                   }}
@@ -183,7 +202,7 @@ export function Login({ store }: { store: RescueStore }) {
             </button>
             {store.demoPins && (
               <small className="demo-pins">
-                {t('DEMO PIN for this role')}: <b>{store.demoPins[role]}</b>
+                {t('Demo: the PIN ({pin}) is filled in for you. Just press Sign in.', { pin: store.demoPins[role] })}
               </small>
             )}
           </form>

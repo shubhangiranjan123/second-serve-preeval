@@ -408,4 +408,11 @@ export const STRINGS: Record<string, [string, string]> = {
     '— ਜਦਕਿ ਕੁਝ ਗਲੀਆਂ ਦੂਰ, ਕੋਈ ਇੱਕ ਵੇਲੇ ਦੇ ਖਾਣੇ ਦੀ ਉਡੀਕ ਕਰ ਰਿਹਾ ਹੈ।',
   ],
   '“{name}” is on the board. Here are its matches.': ['“{name}” बोर्ड पर है। ये रहे इसके मेल।', '“{name}” ਬੋਰਡ ਤੇ ਹੈ। ਇਹ ਰਹੇ ਇਸਦੇ ਮੇਲ।'],
+  'Switch board': ['बोर्ड बदलें', 'ਬੋਰਡ ਬਦਲੋ'],
+  'you': ['आप', 'ਤੁਸੀਂ'],
+  'Back to the start screen': ['शुरुआती स्क्रीन पर वापस', 'ਸ਼ੁਰੂਆਤੀ ਸਕ੍ਰੀਨ ਤੇ ਵਾਪਸ'],
+  'of food. Every plate has a route.': ['खाना। हर थाली का एक रास्ता है।', 'ਖਾਣਾ। ਹਰ ਥਾਲੀ ਦਾ ਇੱਕ ਰਸਤਾ ਹੈ।'],
+  'Pick your board and give it one.': ['अपना बोर्ड चुनें और उसे रास्ता दें।', 'ਆਪਣਾ ਬੋਰਡ ਚੁਣੋ ਅਤੇ ਉਸਨੂੰ ਰਸਤਾ ਦਿਓ।'],
+  'Demo: the PIN ({pin}) is filled in for you. Just press Sign in.': ['डेमो: PIN ({pin}) भर दिया गया है। बस साइन इन दबाएँ।', 'ਡੈਮੋ: PIN ({pin}) ਭਰ ਦਿੱਤਾ ਗਿਆ ਹੈ। ਬੱਸ ਸਾਈਨ ਇਨ ਦਬਾਓ।'],
+  'Recent rescues across the city': ['शहर भर में हाल के बचाव', 'ਸ਼ਹਿਰ ਭਰ ਵਿੱਚ ਹਾਲੀਆ ਬਚਾਅ'],
 }

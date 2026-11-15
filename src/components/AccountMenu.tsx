@@ -2,7 +2,8 @@
 // Shown in the coordinator console and on every role board.
 
 import { useEffect, useRef, useState } from 'react'
-import { Activity, Download, LogOut, Smartphone, X } from 'lucide-react'
+import { Activity, ArrowLeftRight, Download, LogOut, Smartphone, X } from 'lucide-react'
+import type { Role } from '../lib/actions'
 import QRCode from 'qrcode'
 import type { RescueStore, User } from '../lib/useRescueStore'
 import { useT } from '../lib/i18n'
@@ -19,6 +20,58 @@ export function LiveDot({ conn, mode }: { conn: RescueStore['conn']; mode: Rescu
     <span className={cx('live-dot', mode === 'local' ? 'off' : conn === 'live' ? 'on' : 'wait')} title={label}>
       <i /> <span>{label}</span>
     </span>
+  )
+}
+
+/** Sign-in screen opens straight at this role after a switch. */
+export const NEXT_ROLE_KEY = 'second-serve-next-role'
+
+/** Always-visible "Switch board" button: pick a role, land on its sign-in list. */
+export function RoleSwitch({ store, user }: { store: RescueStore; user: User }) {
+  const { t } = useT()
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const onDoc = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false)
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    document.addEventListener('mousedown', onDoc)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDoc)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+  const go = (role: Role) => {
+    try {
+      sessionStorage.setItem(NEXT_ROLE_KEY, role)
+    } catch {
+      /* private mode: lands on the role picker instead */
+    }
+    setOpen(false)
+    store.logout()
+  }
+  return (
+    <div className="role-switch" ref={ref}>
+      <button className="role-switch-btn" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-haspopup="menu" title={t('Switch board')} aria-label={t('Switch board')}>
+        <ArrowLeftRight size={16} />
+        <span>{t('Switch board')}</span>
+      </button>
+      {open && (
+        <div className="role-switch-menu" role="menu">
+          {(Object.keys(ROLE_LABEL) as Role[]).map((r) => (
+            <button key={r} role="menuitem" className={cx('rs-item', `role-${r}`, r === user.role && 'is-me')} onClick={() => go(r)}>
+              <i />
+              {t(ROLE_LABEL[r])}
+              {r === user.role && <em>{t('you')}</em>}
+            </button>
+          ))}
+          <button role="menuitem" className="rs-all" onClick={() => go('' as Role)}>
+            {t('Back to the start screen')}
+          </button>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -48,6 +101,8 @@ export function AccountMenu({ store, user, toast }: { store: RescueStore; user: 
     .toUpperCase()
 
   return (
+    <>
+    <RoleSwitch store={store} user={user} />
     <div className="acct" ref={ref}>
       <button className="acct-btn" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-haspopup="menu">
         <span className={cx('acct-avatar', `role-${user.role}`)}>{initials}</span>
@@ -89,6 +144,7 @@ export function AccountMenu({ store, user, toast }: { store: RescueStore; user: 
       {panel === 'phone' && <PhonePanel mode={store.mode} onClose={() => setPanel(null)} />}
       {panel === 'log' && <ActivityLog onClose={() => setPanel(null)} />}
     </div>
+    </>
   )
 }
 

@@ -37,7 +37,7 @@ npm run build
 npm run start        # app + API on http://localhost:8787
 ```
 
-Tests: `npm test` (97 tests: safety rules, matching pipeline, AI server, role permissions, rescue flow, and the data API on a real SQLite file). Type-check only: `npm run typecheck`
+Tests: `npm test` (100 tests: safety rules, matching pipeline, AI server, role permissions, rescue flow, and the data API on a real SQLite file). Type-check only: `npm run typecheck`
 
 macOS and Linux use the same commands.
 
@@ -72,6 +72,19 @@ Donors and NGOs can also create their own account (*New donor? / New NGO? Create
 > Demo PINs are for a hackathon demo. Before real use, set `SS_DEMO=0`, set your own coordinator PIN, and serve it over HTTPS.
 
 **Deploying online:** any host that runs a long-lived Node 22.13+ process with a persistent disk works (e.g. Render with a disk, Railway with a volume, a small VPS). Build command `npm install && npm run build`, start command `npm start`, set `GEMINI_API_KEY` and `SS_DB_PATH` (pointing at the persistent disk) in the host's environment. Serverless hosts without a disk will lose the database.
+
+## 1c. Live map
+
+**Live map** (coordinator → Map, plus a mini map on the runner's current run):
+- Real streets from OpenStreetMap (free tiles, no API key), darkened to match the app.
+- Each rescue on the road follows the **actual road route** (OSRM public router), cached in the browser. If the router can't be reached it draws a dotted arc and labels it a straight-line estimate.
+- Food waiting shows a pin with its safe time left (orange → yellow → white as it gets urgent). NGOs show how many rescues they received today.
+- **Runners:** solid ring + LIVE = real GPS from their phone; dashed = estimated from their route and the time since pickup; plain = home base. Demo runners are estimated unless someone signs in as them and shares location.
+- *Replay last 24 hours* now plays on the real streets. *Illustrated* switches back to the hand-drawn map (works with no internet).
+
+**Sharing a runner's real GPS:** runner board → *Share live location*. Browsers only allow GPS on `https://` or `localhost`. On the laptop itself it works at `http://localhost:8787`. For phones, use an HTTPS link, e.g. deploy it (Render etc.), or run a free tunnel on the laptop: `npx cloudflared tunnel --url http://localhost:8787` and open the `https://….trycloudflare.com` link it prints on the phone.
+
+**Needs internet** for map tiles and road routes. Without it, markers and live updates still work on a plain grid, and *Illustrated* is fully offline.
 
 ## 1b. Final build: what changed
 
