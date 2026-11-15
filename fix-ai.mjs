@@ -176,7 +176,7 @@ for (const model of candidates) {
 
 // ---------------------------------------------------------------- write
 step('4/4  Saving settings')
-const next = { ...env, GEMINI_API_KEY: key, VISION_TIMEOUT_MS: '45000' }
+const next = { ...env, GEMINI_API_KEY: key, VISION_TIMEOUT_MS: '25000' }
 delete next.VISION_PROVIDER
 delete next.GEMINI_VERTEX
 if (chosen) {

@@ -32,11 +32,10 @@ type Props = {
   onClose: () => void
   onOpenImpact: () => void
   onApprove?: (d: Donation) => void
-  onAutoMatch?: (d: Donation, snapshot: AppState) => void
   onNavigate?: (v: 'dispatch' | 'trust') => void
 }
 
-export function RescueFile({ donation: d, state, now, store, toast, onClose, onOpenImpact, onApprove, onAutoMatch, onNavigate }: Props) {
+export function RescueFile({ donation: d, state, now, store, toast, onClose, onOpenImpact, onApprove, onNavigate }: Props) {
   const { t } = useT()
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
@@ -189,9 +188,11 @@ export function RescueFile({ donation: d, state, now, store, toast, onClose, onO
                   <button
                     className="btn btn-ghost"
                     onClick={() => {
-                      store.withdraw(d.id)
-                      toast(t('Listing rejected and removed.'), 'warn')
-                      onClose()
+                      store.withdraw(d.id).then((r) => {
+                        if (!r.ok) return
+                        toast(t('Listing rejected and removed.'), 'warn')
+                        onClose()
+                      })
                     }}
                   >
                     <Trash2 size={16} /> {t('Reject')}
@@ -242,23 +243,24 @@ export function RescueFile({ donation: d, state, now, store, toast, onClose, onO
                   pipeline={pipeline}
                   scanKey={d.id}
                   onReserve={(c) => {
-                    store.reserve(d.id, c.e.ngo.id, c.score)
-                    toast(t('Reserved for {name}. Now assign a runner.', { name: c.e.ngo.name }))
+                    store.reserve(d.id, c.e.ngo.id, c.score).then((r) => r.ok && toast(t('Reserved for {name}. Now assign a runner.', { name: c.e.ngo.name })))
                   }}
                   onWeights={(w) => {
-                    store.setWeights(w)
-                    toast(w ? t('Custom weights applied to all matching.') : t('Default weights restored.'), 'info')
+                    store.setWeights(w).then((r) => r.ok && toast(w ? t('Custom weights applied to all matching.') : t('Default weights restored.'), 'info'))
                   }}
                   onHint={(h) => {
                     if (!h.action) return
                     if (h.action.kind === 'runners') return onNavigate?.('dispatch')
                     if (h.action.kind === 'trust') return onNavigate?.('trust')
-                    const child = store.splitDonation(d.id, h.action.servings)
-                    if (!child) return toast(t('Couldn’t split this listing.'), 'warn')
-                    toast(t('Split {n} servings into a new listing.', { n: child.servings }), 'info')
-                    onAutoMatch?.(child, {
-                      ...state,
-                      donations: [child, ...state.donations.map((x) => (x.id === d.id ? { ...x, servings: x.servings - child.servings } : x))],
+                    const n = h.action.servings
+                    store.splitDonation(d.id, n, true).then((r) => {
+                      if (!r.ok) return
+                      toast(
+                        r.result.matchedTo
+                          ? t('Split {n} servings into a new listing. Published and matched to {name}. Now assign a runner.', { n, name: r.result.matchedTo })
+                          : t('Split {n} servings into a new listing.', { n }),
+                        'info',
+                      )
                     })
                   }}
                 />
@@ -276,8 +278,7 @@ export function RescueFile({ donation: d, state, now, store, toast, onClose, onO
                   <button
                     className="btn btn-ghost btn-sm"
                     onClick={() => {
-                      store.releaseMatch(d.id)
-                      toast(t('Match released. The listing is back on the board.'), 'info')
+                      store.releaseMatch(d.id).then((r) => r.ok && toast(t('Match released. The listing is back on the board.'), 'info'))
                     }}
                   >
                     <Undo2 size={14} /> {t('Release')}
@@ -321,8 +322,7 @@ export function RescueFile({ donation: d, state, now, store, toast, onClose, onO
                         className="btn btn-dark btn-sm"
                         disabled={unavailable}
                         onClick={() => {
-                          store.assignRunner(d.id, o.runner.id)
-                          toast(t('{name} is on the way to {donor}.', { name: o.runner.name, donor: d.donor }))
+                          store.assignRunner(d.id, o.runner.id).then((r) => r.ok && toast(t('{name} is on the way to {donor}.', { name: o.runner.name, donor: d.donor })))
                         }}
                       >
                         <Bike size={14} /> {t('Assign')}
@@ -342,9 +342,12 @@ export function RescueFile({ donation: d, state, now, store, toast, onClose, onO
               <button
                 className="btn btn-primary btn-block btn-lg"
                 onClick={() => {
-                  store.advance(d.id)
-                  if (d.stage === 'Assigned') toast(t('Picked up from {donor}. Keep it moving.', { donor: d.donor }), 'info')
-                  else toast(t('Delivered! {n} servings added to lifetime rescues.', { n: d.servings }))
+                  const stage = d.stage
+                  store.advance(d.id).then((r) => {
+                    if (!r.ok) return
+                    if (stage === 'Assigned') toast(t('Picked up from {donor}. Keep it moving.', { donor: d.donor }), 'info')
+                    else toast(t('Delivered! {n} servings added to lifetime rescues.', { n: d.servings }))
+                  })
                 }}
               >
                 {d.stage === 'Assigned' ? (

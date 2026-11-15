@@ -8,8 +8,11 @@
 import { createServer } from 'node:http'
 import { readFileSync, existsSync, statSync, createReadStream } from 'node:fs'
 import { extname, join, normalize, resolve, dirname } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { createApiHandler } from './app.mjs'
+import { openDb } from './db.mjs'
+import { createDataApi, DEMO_PINS } from './data.mjs'
+import { networkInterfaces } from 'node:os'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -37,10 +40,22 @@ const cfg = {
   GEMINI_BASE_URL: process.env.GEMINI_BASE_URL, // optional: corporate proxy / test harness
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
   ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL,
-  timeoutMs: Number(process.env.VISION_TIMEOUT_MS) || 45_000,
+  timeoutMs: Number(process.env.VISION_TIMEOUT_MS) || 25_000, // per attempt; worst case ≈ 25 s + retry 25 s, backups within an 85 s budget
 }
 
-const api = createApiHandler(cfg)
+// ---- data backend (SQLite + accounts + live updates)
+const corePath = join(root, 'server', 'build', 'core.mjs')
+if (!existsSync(corePath)) {
+  console.error('Missing server/build/core.mjs. Run: npm run build:core')
+  process.exit(1)
+}
+const core = await import(pathToFileURL(corePath).href)
+const dbFile = process.env.SS_DB_PATH || join(root, 'data', 'second-serve.db')
+const db = openDb(dbFile)
+const demo = process.env.SS_DEMO !== '0'
+const data = createDataApi({ db, core, demo, coordinatorPin: process.env.SS_COORDINATOR_PIN || DEMO_PINS.coordinator })
+
+const api = createApiHandler(cfg, { requireUser: (req) => data.currentUser(req) })
 const serveStatic = process.argv.includes('--static')
 const dist = join(root, 'dist')
 const TYPES = {
@@ -56,7 +71,12 @@ const TYPES = {
 
 const server = createServer((req, res) => {
   const path = (req.url ?? '/').split('?')[0]
-  if (path.startsWith('/api/')) return void api(req, res)
+  if (path.startsWith('/api/')) {
+    Promise.resolve(data.handle(req, res)).then((handled) => {
+      if (handled === false) api(req, res)
+    })
+    return
+  }
   if (!serveStatic) {
     res.writeHead(404).end('API server. Run the app with npm run dev.')
     return
@@ -75,7 +95,20 @@ server.on('error', (err) => {
   else console.error(err)
   process.exit(1)
 })
-server.listen(port, () => {
+server.listen(port, '0.0.0.0', () => {
   const configured = cfg.GEMINI_API_KEY ? 'gemini' : cfg.ANTHROPIC_API_KEY ? 'anthropic' : 'NONE (set GEMINI_API_KEY in .env)'
-  console.log(`second-serve AI backend on http://localhost:${port}  ·  vision provider: ${cfg.VISION_PROVIDER || configured}${serveStatic ? '  ·  serving dist/' : ''}`)
+  const lan = Object.values(networkInterfaces()).flat().filter((i) => i && i.family === 'IPv4' && !i.internal).map((i) => i.address)
+  console.log(`second-serve backend on http://localhost:${port}  ·  database: ${dbFile}  ·  vision: ${cfg.VISION_PROVIDER || configured}${serveStatic ? '  ·  serving the app' : ''}`)
+  if (serveStatic && lan.length) console.log(`On phones (same Wi-Fi): ${lan.map((ip) => `http://${ip}:${port}`).join('  ')}`)
+  if (demo) console.log(`Demo PINs: coordinator ${process.env.SS_COORDINATOR_PIN ? '(custom)' : DEMO_PINS.coordinator} · donors ${DEMO_PINS.donor} · NGOs ${DEMO_PINS.ngo} · runners ${DEMO_PINS.runner}`)
 })
+const shutdown = () => {
+  data.close()
+  server.close(() => {
+    db.close()
+    process.exit(0)
+  })
+  setTimeout(() => process.exit(0), 1500).unref()
+}
+process.on('SIGINT', shutdown)
+process.on('SIGTERM', shutdown)

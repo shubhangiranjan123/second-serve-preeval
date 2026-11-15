@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { BarChart3, Bike, Building2, Home, Map, ScanLine, ShieldCheck, Soup, Tv } from 'lucide-react'
 import { Wordmark } from './Art'
 import { cx } from './ui'
@@ -33,11 +34,13 @@ export function TopNav({
   onNavigate,
   counts,
   onScan,
+  account,
 }: {
   view: View
   onNavigate: (v: View) => void
   counts: Partial<Record<View, number>>
   onScan: () => void
+  account?: ReactNode
 }) {
   const { t } = useT()
   return (
@@ -77,6 +80,7 @@ export function TopNav({
         <button className="btn btn-pink" onClick={onScan}>
           <ScanLine size={17} /> <span>{t('Scan & donate')}</span>
         </button>
+        {account}
       </div>
     </header>
   )

@@ -13,7 +13,7 @@ export const LIMITS = {
   minPhotos: 1,
   maxPhotos: 4,
   minImageBytes: 2 * 1024, // smaller than this is not a usable photo
-  ratePerMinute: 12, // per client IP
+  ratePerMinute: 30, // per client IP (a scan can take 2 requests with the automatic retry)
 }
 
 const MIME = new Set(['image/jpeg', 'image/png', 'image/webp'])
@@ -75,7 +75,7 @@ function readBody(req, limit) {
 
 const RETRYABLE = new Set(['PROVIDER_BUSY', 'TIMEOUT', 'PROVIDER_UNREACHABLE', 'PROVIDER_ERROR', 'PROVIDER_RATE_LIMIT', 'INVALID_RESPONSE', 'RATE_LIMITED'])
 
-export function createApiHandler(cfg, { fetchImpl = fetch, clock = Date.now } = {}) {
+export function createApiHandler(cfg, { fetchImpl = fetch, clock = Date.now, requireUser = null } = {}) {
   const hits = new Map() // ip -> timestamps within the last minute
 
   function rateLimited(ip) {
@@ -105,6 +105,8 @@ export function createApiHandler(cfg, { fetchImpl = fetch, clock = Date.now } = 
 
       if (url.pathname === '/api/food-scan') {
         if (req.method !== 'POST') throw new ScanError('METHOD', 'Use POST', 405)
+        // With the data backend running, only signed-in users can spend the AI quota.
+        if (requireUser && !requireUser(req)) throw new ScanError('SIGN_IN', 'Sign in to use the AI scanner', 401)
         if (!String(req.headers['content-type'] ?? '').includes('application/json'))
           throw new ScanError('BAD_REQUEST', 'Content-Type must be application/json', 415)
         const ip = String(req.headers['x-forwarded-for'] ?? req.socket?.remoteAddress ?? 'local').split(',')[0].trim()

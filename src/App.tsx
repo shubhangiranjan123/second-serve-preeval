@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { RotateCcw } from 'lucide-react'
-import { useRescueStore } from './lib/useRescueStore'
+import { useRescueStore, type RescueStore, type User } from './lib/useRescueStore'
 import { TopNav, NAV, type View } from './components/Sidebar'
 import { Toasts, type Toast } from './components/Toasts'
-import { DonationForm } from './components/DonationForm'
-import { FoodScan, type ScanHandoff } from './components/FoodScan'
-import { runMatchingPipeline } from './lib/pipeline'
+import { ScanFlow } from './components/ScanFlow'
 import { RescueFile } from './components/RescueFile'
 import { Drop, Grain, Wordmark } from './components/Art'
+import { AccountMenu } from './components/AccountMenu'
 import { cx } from './components/ui'
 import { Home } from './views/Home'
 import { RescueBoard } from './views/RescueBoard'
@@ -17,11 +16,15 @@ import { Dispatch } from './views/Dispatch'
 import { Impact } from './views/Impact'
 import { Live } from './views/Live'
 import { MapView } from './views/MapView'
+import { Login } from './views/Login'
+import { DonorBoard } from './views/boards/DonorBoard'
+import { NgoBoard } from './views/boards/NgoBoard'
+import { RunnerBoard } from './views/boards/RunnerBoard'
 import { Cursor } from './components/Cursor'
 import { chime } from './lib/sound'
 import { SPECIES, milestoneReached, MILESTONES } from './lib/garden'
 import { useT } from './lib/i18n'
-import type { AppState, Donation, RescueRecord } from './types'
+import type { AppState, RescueRecord } from './types'
 
 const VIEWS: View[] = ['home', 'board', 'map', 'ngos', 'trust', 'dispatch', 'impact', 'live']
 
@@ -30,37 +33,82 @@ function readHash(): View {
   return VIEWS.includes(h) ? h : 'home'
 }
 
-function useNow(intervalMs = 15_000) {
-  const [now, setNow] = useState(() => Date.now())
+export function useNow(state: unknown, intervalMs = 15_000) {
+  const [tick, setTick] = useState(() => Date.now())
+  const [changed, setChanged] = useState(() => Date.now())
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), intervalMs)
+    const t = setInterval(() => setTick(Date.now()), intervalMs)
     return () => clearInterval(t)
   }, [intervalMs])
-  return now
+  useEffect(() => setChanged(Date.now()), [state])
+  return Math.max(tick, changed)
 }
 
-export default function App() {
-  const { t } = useT()
-  const store = useRescueStore()
-  const { state } = store
-  const tickNow = useNow()
-  const [actionNow, setActionNow] = useState(() => Date.now())
-  useEffect(() => setActionNow(Date.now()), [state])
-  const now = Math.max(tickNow, actionNow)
+export type ToastFn = (msg: string, tone?: Toast['tone']) => void
 
+function useToasts() {
+  const [toasts, setToasts] = useState<Toast[]>([])
+  const id = useRef(0)
+  const toast = useCallback<ToastFn>((msg, tone = 'ok') => {
+    const n = ++id.current
+    setToasts((t) => [...t.slice(-2), { id: n, msg, tone }])
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== n)), 3800)
+  }, [])
+  return { toasts, toast }
+}
+
+// ---------------------------------------------------------------- gate
+
+export default function App() {
+  const store = useRescueStore()
+  const { toasts, toast } = useToasts()
+  const { t } = useT()
+
+  useEffect(() => store.setErrorHandler((m) => toast(m, 'warn')), [store.setErrorHandler, toast]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  let body
+  if (store.mode === 'loading' || (store.user && !store.state)) {
+    body = (
+      <div className="splash" aria-live="polite">
+        <Wordmark />
+        <span className="spinner" />
+        <p>{store.mode === 'loading' ? t('Connecting to SECOND-SERVE…') : t('Loading the live board…')}</p>
+      </div>
+    )
+  } else if (!store.user || !store.state) {
+    body = <Login store={store} />
+  } else if (store.user.role === 'coordinator') {
+    body = <Console store={store} state={store.state} user={store.user} toast={toast} />
+  } else if (store.user.role === 'donor') {
+    body = <DonorBoard store={store} state={store.state} user={store.user} toast={toast} />
+  } else if (store.user.role === 'ngo') {
+    body = <NgoBoard store={store} state={store.state} user={store.user} toast={toast} />
+  } else {
+    body = <RunnerBoard store={store} state={store.state} user={store.user} toast={toast} />
+  }
+
+  return (
+    <>
+      {body}
+      <Toasts toasts={toasts} />
+    </>
+  )
+}
+
+// ---------------------------------------------------------------- coordinator console
+
+function Console({ store, state, user, toast }: { store: RescueStore; state: AppState; user: User; toast: ToastFn }) {
+  const { t } = useT()
+  const now = useNow(state)
   const [view, setView] = useState<View>(readHash)
   const [openId, setOpenId] = useState<number | null>(null)
-  const [formOpen, setFormOpen] = useState(false)
   const [scanOpen, setScanOpen] = useState(false)
-  const [scanned, setScanned] = useState<ScanHandoff | undefined>(undefined)
   const [confirmReset, setConfirmReset] = useState(false)
-  const [toasts, setToasts] = useState<Toast[]>([])
   const [celebrate, setCelebrate] = useState<RescueRecord | null>(null)
   const [milestone, setMilestone] = useState<(typeof MILESTONES)[number] | null>(null)
-  const toastId = useRef(0)
   const historyCount = useRef(state.history.length)
 
-  // A new delivery anywhere (this tab or another) triggers the stamp moment.
+  // A new delivery anywhere (any screen, any device) triggers the stamp moment.
   useEffect(() => {
     if (state.history.length > historyCount.current) {
       const latest = [...state.history].sort((a, b) => b.deliveredAt - a.deliveredAt)[0]
@@ -99,45 +147,18 @@ export default function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }, [])
 
-  const toast = useCallback((msg: string, tone: Toast['tone'] = 'ok') => {
-    const id = ++toastId.current
-    setToasts((t) => [...t.slice(-2), { id, msg, tone }])
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3600)
-  }, [])
-
-  // Engine 1 → Engine 2 handoff. Runs the matching pipeline on a freshly
-  // published (or freshly approved) listing and, if an NGO passes every
-  // gate AND the real-pickup feasibility check, reserves it straight away.
-  // The coordinator can still release it from the rescue file.
-  const autoMatch = useCallback(
-    (d: Donation, snapshot: AppState) => {
-      const p = runMatchingPipeline(d, snapshot, Date.now(), snapshot.weights)
-      if (p.recommended) {
-        store.reserve(d.id, p.recommended.e.ngo.id, p.recommended.score)
-        toast(t('Published and matched to {name}. Now assign a runner.', { name: p.recommended.e.ngo.name }))
-      } else {
-        toast(t('Published, but no organisation can take it in time. It stays on the board, unmatched.'), 'warn')
-      }
-    },
-    [store, toast, t],
-  )
-
-  const openScan = () => {
-    setScanned(undefined)
-    setFormOpen(false)
-    setScanOpen(true)
-  }
-
+  const openScan = () => setScanOpen(true)
   const open = state.donations.find((d) => d.id === openId) ?? null
   const counts = {
-    board: state.donations.filter((d) => d.status === 'Available').length,
+    board: state.donations.filter((d) => d.status === 'Available' || d.status === 'In review').length,
     dispatch: state.donations.filter((d) => d.status === 'Reserved').length,
+    trust: (state.applications ?? []).filter((a) => a.status === 'Submitted' || a.status === 'Under Review').length,
   }
   const openFile = (d: { id: number }) => setOpenId(d.id)
 
   useEffect(() => {
-    document.body.style.overflow = open || formOpen || scanOpen || confirmReset ? 'hidden' : ''
-  }, [open, formOpen, scanOpen, confirmReset])
+    document.body.style.overflow = open || scanOpen || confirmReset ? 'hidden' : ''
+  }, [open, scanOpen, confirmReset])
 
   const celebration = celebrate && (
     <div className="celebrate" aria-live="assertive">
@@ -163,12 +184,6 @@ export default function App() {
     </div>
   )
 
-  const overlays = (
-    <>
-      <Cursor />
-    </>
-  )
-
   if (view === 'live') {
     return (
       <>
@@ -176,7 +191,7 @@ export default function App() {
         <Live state={state} now={now} onExit={() => navigate('home')} />
         {celebration}
         {milestoneBanner}
-        {overlays}
+        <Cursor />
       </>
     )
   }
@@ -184,7 +199,7 @@ export default function App() {
   return (
     <div className="shell">
       <Grain />
-      <TopNav view={view} onNavigate={navigate} counts={counts} onScan={openScan} />
+      <TopNav view={view} onNavigate={navigate} counts={counts} onScan={openScan} account={<AccountMenu store={store} user={user} toast={toast} />} />
 
       <main className={cx('content', view === 'home' && 'content-home')} key={view}>
         {view === 'home' && <Home state={state} now={now} onAdd={openScan} onOpen={openFile} onNavigate={navigate} />}
@@ -200,7 +215,7 @@ export default function App() {
         <Wordmark />
         <span className="footer-tag">{t('Good food. Better futures.')}</span>
         <span className="footer-note">
-          {t('Pre-evaluation build · demonstration data (fictional NGOs, simulated runners) · feasibility is a screening aid, not a food-safety certification · environmental figures are estimates · supports SDG 13.')}
+          {t('Demonstration data (fictional NGOs, simulated runners) · feasibility is a screening aid, not a food-safety certification · environmental figures are estimates · supports SDG 13.')}
         </span>
         <button className="reset-link" onClick={() => setConfirmReset(true)}>
           <RotateCcw size={13} /> {t('Reset demo data')}
@@ -216,48 +231,7 @@ export default function App() {
         ))}
       </nav>
 
-      {scanOpen && (
-        <FoodScan
-          onClose={() => setScanOpen(false)}
-          onResult={(r) => {
-            setScanned(r)
-            setScanOpen(false)
-            setFormOpen(true)
-          }}
-        />
-      )}
-
-      {formOpen && scanned && (
-        <DonationForm
-          key={scanned ? (scanned.kind === 'scan' ? scanned.meta.at : 'noscan') : 'manual'}
-          state={state}
-          now={now}
-          scanned={scanned}
-          onRescan={openScan}
-          onClose={() => {
-            setFormOpen(false)
-            setScanned(undefined)
-          }}
-          onSubmit={(input, extras) => {
-            const created = store.addDonation(input, extras)
-            setFormOpen(false)
-            setScanned(undefined)
-            if (!created) {
-              toast(t('“{name}” from {donor} is already on the board. Open it there instead of listing it twice.', { name: input.name, donor: input.donor }), 'warn')
-              return
-            }
-            if (!extras?.screening) {
-              // Original manual flow, unchanged: open the file and let the coordinator pick.
-              toast(t('“{name}” is on the board. Here are its matches.', { name: created.name }))
-            } else if (created.status === 'In review') {
-              toast(t('“{name}” is waiting for a human check before matching.', { name: created.name }), 'info')
-            } else {
-              autoMatch(created, { ...state, donations: [created, ...state.donations] })
-            }
-            setOpenId(created.id)
-          }}
-        />
-      )}
+      <ScanFlow open={scanOpen} onClose={() => setScanOpen(false)} state={state} now={now} store={store} toast={toast} onPublished={(id) => setOpenId(id)} />
 
       {open && (
         <RescueFile
@@ -268,13 +242,18 @@ export default function App() {
           toast={toast}
           onClose={() => setOpenId(null)}
           onOpenImpact={() => navigate('impact')}
-          onAutoMatch={autoMatch}
           onNavigate={(v) => navigate(v)}
-          onApprove={(d) => {
-            store.approveReview(d.id)
-            const approved: Donation = { ...d, status: 'Available' }
-            autoMatch(approved, { ...state, donations: state.donations.map((x) => (x.id === d.id ? approved : x)) })
-          }}
+          onApprove={(d) =>
+            store.approveReview(d.id, undefined, true).then((r) => {
+              if (!r.ok) return
+              toast(
+                r.result.matchedTo
+                  ? t('Published and matched to {name}. Now assign a runner.', { name: r.result.matchedTo })
+                  : t('Published, but no organisation can take it in time. It stays on the board, unmatched.'),
+                r.result.matchedTo ? 'ok' : 'warn',
+              )
+            })
+          }
         />
       )}
 
@@ -282,20 +261,26 @@ export default function App() {
         <div className="modal-scrim" onClick={() => setConfirmReset(false)}>
           <div className="modal confirm" role="alertdialog" aria-modal="true" aria-label="Reset demo data" onClick={(e) => e.stopPropagation()}>
             <h2>{t('Reset demo data?')}</h2>
-            <p>{t('This clears every listing, match and rescue you created in this browser and restores the sample city.')}</p>
+            <p>
+              {store.mode === 'server'
+                ? t('This clears every listing, match and rescue on the server, for everyone, and restores the sample city. Accounts are kept.')
+                : t('This clears every listing, match and rescue you created in this browser and restores the sample city.')}
+            </p>
             <div className="confirm-actions">
               <button className="btn btn-outline-ink" onClick={() => setConfirmReset(false)}>
                 {t('Keep my data')}
               </button>
               <button
                 className="btn btn-ink"
-                onClick={() => {
-                  store.reset()
-                  setConfirmReset(false)
-                  setOpenId(null)
-                  toast(t('Demo data restored.'), 'info')
-                  navigate('home')
-                }}
+                onClick={() =>
+                  store.reset().then((r) => {
+                    setConfirmReset(false)
+                    if (!r.ok) return
+                    setOpenId(null)
+                    toast(t('Demo data restored.'), 'info')
+                    navigate('home')
+                  })
+                }
               >
                 <RotateCcw size={15} /> {t('Reset')}
               </button>
@@ -306,8 +291,7 @@ export default function App() {
 
       {celebration}
       {milestoneBanner}
-      <Toasts toasts={toasts} />
-      {overlays}
+      <Cursor />
     </div>
   )
 }

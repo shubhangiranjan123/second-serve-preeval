@@ -26,7 +26,7 @@ export type ScanHandoff =
   | { kind: 'error'; message: string; thumbs: string[] }
 
 type Photo = { id: number; name: string; dataUrl: string; thumb: string }
-type Phase = { at: 'capture' } | { at: 'analysing' } | { at: 'failed'; message: string; retryable: boolean }
+type Phase = { at: 'capture' } | { at: 'analysing' } | { at: 'failed'; message: string; retryable: boolean; code: string }
 
 let nextId = 1
 
@@ -35,6 +35,7 @@ export function FoodScan({ onClose, onResult }: { onClose: () => void; onResult:
   const [photos, setPhotos] = useState<Photo[]>([])
   const [problems, setProblems] = useState<string[]>([])
   const [adding, setAdding] = useState(false)
+  const [retrying, setRetrying] = useState(false)
   const [phase, setPhase] = useState<Phase>({ at: 'capture' })
   const [health, setHealth] = useState<VisionHealth | null | 'loading'>('loading')
   const [dragging, setDragging] = useState(false)
@@ -45,6 +46,13 @@ export function FoodScan({ onClose, onResult }: { onClose: () => void; onResult:
   const replaceId = useRef<number | null>(null)
   const abort = useRef<AbortController | null>(null)
 
+  // Setup runs ONCE per opening of the scan window. (It used to depend on
+  // onClose, which the parent re-creates on every render, so the app's
+  // 15-second clock tick re-ran this effect and its cleanup cancelled any
+  // scan in progress. That was the "sometimes it scans, sometimes it
+  // doesn't" bug.)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
   useEffect(() => {
     visionHealth().then(setHealth)
     // Optional demo photos in public/samples (set up by `node fix-ai.mjs`).
@@ -53,13 +61,13 @@ export function FoodScan({ onClose, onResult }: { onClose: () => void; onResult:
       .then((r) => (r.ok ? r.json() : []))
       .then((list: unknown) => setSamples(Array.isArray(list) ? list.slice(0, 4) : []))
       .catch(() => setSamples([]))
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onCloseRef.current()
     window.addEventListener('keydown', onKey)
     return () => {
       window.removeEventListener('keydown', onKey)
-      abort.current?.abort()
+      abort.current?.abort() // only when the scan window actually closes
     }
-  }, [onClose])
+  }, [])
 
   /** Validate, shrink and strip metadata from each file. Bad files get a message, good ones a slot. */
   async function prepare(files: File[]): Promise<{ ok: Photo[]; bad: string[] }> {
@@ -135,13 +143,28 @@ export function FoodScan({ onClose, onResult }: { onClose: () => void; onResult:
     abort.current?.abort()
     const ctrl = new AbortController()
     abort.current = ctrl
-    const res = await scanFood(
+    let res = await scanFood(
       photos.map((p) => p.dataUrl),
       ctrl.signal,
     )
     if (ctrl.signal.aborted) return
+    // One quiet automatic retry for temporary problems (Google busy, rate
+    // limit, slow or garbled answer, network blip) before showing an error.
+    // Timeouts are NOT retried here: the server already retried those within
+    // its own time budget, and doing it again would double the wait.
+    if (!res.ok && res.error.retryable && res.error.code !== 'RATE_LIMITED' && res.error.code !== 'TIMEOUT') {
+      setRetrying(true)
+      await new Promise((r) => setTimeout(r, 2500))
+      if (ctrl.signal.aborted) return
+      res = await scanFood(
+        photos.map((p) => p.dataUrl),
+        ctrl.signal,
+      )
+      setRetrying(false)
+      if (ctrl.signal.aborted) return
+    }
     if (res.ok) onResult({ kind: 'scan', scan: res.scan, meta: res.meta, thumbs: photos.map((p) => p.thumb) })
-    else setPhase({ at: 'failed', message: friendlyError(res.error), retryable: res.error.retryable })
+    else setPhase({ at: 'failed', message: friendlyError(res.error), retryable: res.error.retryable, code: res.error.code })
   }
 
   function onDrop(e: DragEvent) {
@@ -280,9 +303,9 @@ export function FoodScan({ onClose, onResult }: { onClose: () => void; onResult:
           {phase.at === 'analysing' && (
             <div className="scan-side" aria-live="polite">
               <Loader2 size={22} className="spin" />
-              <strong>{n === 1 ? t('Reading your photo…') : t('Reading {n} photos together…', { n })}</strong>
+              <strong>{retrying ? t('Google is busy, trying again…') : n === 1 ? t('Reading your photo…') : t('Reading {n} photos together…', { n })}</strong>
               <p>{t('The vision model is identifying the food, its condition and packaging across all photos. Photos show what food looks like, not whether it’s safe, so safety rules run next.')}</p>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => { abort.current?.abort(); setPhase({ at: 'capture' }) }}>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => { abort.current?.abort(); setRetrying(false); setPhase({ at: 'capture' }) }}>
                 {t('Cancel')}
               </button>
             </div>
@@ -292,6 +315,7 @@ export function FoodScan({ onClose, onResult }: { onClose: () => void; onResult:
             <div className="scan-side" role="alert">
               <strong>{t('The scan didn’t work')}</strong>
               <p>{phase.message}</p>
+              <small className="scan-code">{t('Error code')}: {phase.code}</small>
               <div className="scan-actions">
                 {phase.retryable && (
                   <button type="button" className="btn btn-primary" onClick={analyse}>

@@ -140,6 +140,18 @@ describe('AI backend', () => {
     expect(urls.filter((u) => u.includes('main-flash'))).toHaveLength(2)
   })
 
+  test('a slow first answer is retried once and then succeeds', async () => {
+    let calls = 0
+    const call = await boot({ GEMINI_API_KEY: 'k' }, (_u: string, init: { signal: AbortSignal }) => {
+      calls++
+      if (calls === 1) return new Promise((_, rej) => init.signal.addEventListener('abort', () => rej(Object.assign(new Error('a'), { name: 'AbortError' }))))
+      return geminiOk(MODEL_REPLY)()
+    })
+    const body = await (await call('/api/food-scan', { image: dataUrl(JPEG) })).json()
+    expect(body.ok).toBe(true)
+    expect(calls).toBe(2)
+  })
+
   test('503 everywhere → PROVIDER_BUSY, retryable, friendly message', async () => {
     const call = await boot({ GEMINI_API_KEY: 'k' }, async () => new Response('{"error":{"status":"UNAVAILABLE"}}', { status: 503 }))
     const body = await (await call('/api/food-scan', { image: dataUrl(JPEG) })).json()
@@ -173,10 +185,10 @@ describe('AI backend', () => {
     expect((await call('/api/food-scan', { image: dataUrl(big) })).status).toBe(413)
   })
 
-  test('rate limit: 13th scan in a minute → 429', async () => {
+  test('rate limit: 31st scan in a minute → 429', async () => {
     const call = await boot({ GEMINI_API_KEY: 'k' }, geminiOk(MODEL_REPLY))
     let last = 0
-    for (let i = 0; i < 13; i++) last = (await call('/api/food-scan', { image: dataUrl(JPEG) })).status
+    for (let i = 0; i < 31; i++) last = (await call('/api/food-scan', { image: dataUrl(JPEG) })).status
     expect(last).toBe(429)
   })
 })

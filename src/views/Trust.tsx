@@ -172,16 +172,19 @@ export function Trust({ state, store, toast }: { state: AppState; store: RescueS
       {open && <ReviewDrawer app={open} store={store} toast={toast} onClose={() => setOpenId(null)} />}
       {editing && (
         <ApplicationForm
+          store={store}
           draft={editing}
           onClose={() => setEditing(null)}
           onSave={(a, asDraft) => {
-            store.submitApplication(a, asDraft)
-            setEditing(null)
-            toast(asDraft ? t('Draft saved.') : t('Application submitted. A coordinator will review it.'), asDraft ? 'info' : 'ok')
-            if (!asDraft) {
-              setTab('review')
-              setBucket('pending')
-            }
+            store.submitApplication(a, asDraft).then((r) => {
+              if (!r.ok) return
+              setEditing(null)
+              toast(asDraft ? t('Draft saved.') : t('Application submitted. A coordinator will review it.'), asDraft ? 'info' : 'ok')
+              if (!asDraft) {
+                setTab('review')
+                setBucket('pending')
+              }
+            })
           }}
         />
       )}
@@ -222,9 +225,12 @@ function ReviewDrawer({ app: a, store, toast, onClose }: { app: TrustApplication
       setNoteErr(blocked)
       return
     }
-    store.reviewApplication(a.id, action, note.trim() || undefined)
-    setNote('')
-    setNoteErr('')
+    store.reviewApplication(a.id, action, note.trim() || undefined).then((r) => {
+      if (!r.ok) return
+      setNote('')
+      setNoteErr('')
+      toast(msg, action === 'approve' ? 'ok' : 'info')
+    })
     const msg =
       action === 'approve'
         ? a.role === 'recipient'
@@ -235,7 +241,6 @@ function ReviewDrawer({ app: a, store, toast, onClose }: { app: TrustApplication
           : action === 'resubmit'
             ? t('Sent back for resubmission.')
             : t('Review started.')
-    toast(msg, action === 'approve' ? 'ok' : 'info')
   }
 
   const Row = ({ k, v }: { k: string; v: ReactNode }) =>
@@ -302,19 +307,19 @@ function ReviewDrawer({ app: a, store, toast, onClose }: { app: TrustApplication
             ) : (
               <div className="docs">
                 {a.docs.map((d) => (
-                  <button key={d.id} className="doc" onClick={() => (d.preview ? setPreview(d) : undefined)} disabled={!d.preview}>
+                  <button key={d.id} className="doc" onClick={() => (d.url ? window.open(d.url, '_blank', 'noopener') : d.preview ? setPreview(d) : undefined)} disabled={!d.preview && !d.url}>
                     {d.preview ? <img src={d.preview} alt={d.name} /> : <FileText size={28} />}
                     <span>
                       <strong>{d.kind}</strong>
                       <small>
-                        {d.name} · {Math.round(d.size / 1024)} KB{!d.preview && ` · ${t('name only')}`}
+                        {d.name} · {Math.round(d.size / 1024)} KB{d.url ? ` · ${t('open original')}` : !d.preview && ` · ${t('name only')}`}
                       </small>
                     </span>
                   </button>
                 ))}
               </div>
             )}
-            <p className="feas-disclaimer">{t('Images keep a small preview. PDFs are recorded by name only in this demo: ask the applicant to show the original during the call or visit.')}</p>
+            <p className="feas-disclaimer">{t('Files uploaded while the server is running open in full. Older demo entries are recorded by name only.')}</p>
           </section>
 
           <section className="step">
@@ -492,7 +497,17 @@ const DOC_KINDS: Record<TrustRole, string[]> = {
   recipient: ['Registration certificate', '12A / 80G certificate', 'Alternative evidence', 'Kitchen / storage photo', 'Other'],
 }
 
-function ApplicationForm({ draft, onClose, onSave }: { draft: TrustApplication; onClose: () => void; onSave: (a: TrustApplication, asDraft: boolean) => void }) {
+export function ApplicationForm({
+  draft,
+  onClose,
+  onSave,
+  store,
+}: {
+  draft: TrustApplication
+  onClose: () => void
+  onSave: (a: TrustApplication, asDraft: boolean) => void
+  store?: RescueStore
+}) {
   const { t } = useT()
   const [a, setA] = useState<TrustApplication>(draft)
   const [touched, setTouched] = useState(false)
@@ -528,7 +543,17 @@ function ApplicationForm({ draft, onClose, onSave }: { draft: TrustApplication; 
         msgs.push(`${f.name}: ${t('couldn’t be opened (corrupted?)')}`)
         continue
       }
-      added.push({ id: Date.now() + added.length, kind: docKind, name: f.name, size: f.size, type: f.type, preview })
+      // With the server running, the original file is uploaded and stored there.
+      let url: string | undefined
+      if (store?.mode === 'server') {
+        try {
+          url = (await store.uploadDoc(f, docKind)) ?? undefined
+        } catch (e) {
+          msgs.push(`${f.name}: ${(e as Error).message}`)
+          continue
+        }
+      }
+      added.push({ id: Date.now() + added.length, kind: docKind, name: f.name, size: f.size, type: f.type, preview, url })
     }
     setA((p) => ({ ...p, docs: [...p.docs, ...added].slice(0, 8) }))
     setDocErr(msgs.join(' · '))
@@ -709,7 +734,7 @@ function ApplicationForm({ draft, onClose, onSave }: { draft: TrustApplication; 
                   <Upload size={14} /> {t('Add file')}
                   <input type="file" hidden multiple accept={DOC_LIMIT.types.join(',')} onChange={(e) => { addDocs(e.target.files); e.target.value = '' }} />
                 </label>
-                <small>{t('PDF, JPEG, PNG or WebP, up to 5 MB. Demo: kept in this browser only.')}</small>
+                <small>{store?.mode === 'server' ? t('PDF, JPEG, PNG or WebP, up to 5 MB. Stored on the SECOND-SERVE server; only you and coordinators can open it.') : t('PDF, JPEG, PNG or WebP, up to 5 MB. Offline demo: kept in this browser only.')}</small>
                 {docErr && <span className="field-err">{docErr}</span>}
                 {err('docs')}
               </div>

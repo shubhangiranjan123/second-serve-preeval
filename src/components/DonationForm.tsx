@@ -153,18 +153,23 @@ export function DonationForm({
   now,
   onClose,
   onSubmit,
+  fixedDonor,
   scanned,
   onRescan,
 }: {
   state: AppState
   now: number
   onClose: () => void
-  onSubmit: (input: NewDonationInput, extras?: ScreenedExtras) => void
+  onSubmit: (input: NewDonationInput, extras?: ScreenedExtras) => Promise<boolean> | void
+  fixedDonor?: string
   scanned: ScanHandoff // every listing starts from a photo scan (or its no-AI fallback)
   onRescan?: () => void
 }) {
   const { t } = useT()
-  const initial = useMemo(() => prefillFrom(scanned), [scanned])
+  const initial = useMemo(() => {
+    const p = prefillFrom(scanned)
+    return fixedDonor ? { ...p, form: { ...p.form, donor: fixedDonor } } : p
+  }, [scanned, fixedDonor])
   const [f, setF] = useState<FormState>(initial.form)
   // Checklist ticks survive closing/reopening the form (cleared on publish).
   const [checks, setChecks] = useState<boolean[]>(() => {
@@ -336,7 +341,11 @@ export function DonationForm({
     } catch {
       /* ignore */
     }
-    setTimeout(() => onSubmit(input, extras), 450)
+    // Keep the button busy until the server answers; re-enable on failure so
+    // the donor can fix the problem and try again.
+    Promise.resolve(onSubmit(input, extras)).then((ok) => {
+      if (ok === false) setBusy(false)
+    })
   }
 
   const err = (k: keyof typeof errors) => (touched && errors[k] ? <span className="field-err">{errors[k]}</span> : null)
@@ -431,7 +440,7 @@ export function DonationForm({
               </label>
               <label className="field span-2">
                 <span>{t('Donor / restaurant')}</span>
-                <input value={f.donor} onChange={(e) => set('donor', e.target.value)} placeholder="e.g. The Green Kitchen" />
+                <input value={f.donor} onChange={(e) => set('donor', e.target.value)} placeholder="e.g. The Green Kitchen" readOnly={!!fixedDonor} />
                 {err('donor')}
               </label>
               <div className="field span-2">

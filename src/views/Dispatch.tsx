@@ -61,8 +61,7 @@ export function Dispatch({
             <button
               className="btn btn-dark btn-sm btn-block"
               onClick={() => {
-                store.assignRunner(d.id, suggestion.runner.id)
-                toast(t('{name} assigned — {km} km from pickup.', { name: suggestion.runner.name, km: suggestion.km.toFixed(1) }))
+                store.assignRunner(d.id, suggestion.runner.id).then((r) => r.ok && toast(t('{name} assigned — {km} km from pickup.', { name: suggestion.runner.name, km: suggestion.km.toFixed(1) })))
               }}
             >
               <Bike size={14} /> {t('Assign {name} (nearest)', { name: suggestion.runner.name.split(' ')[0] })}
@@ -74,8 +73,7 @@ export function Dispatch({
           <button
             className="btn btn-ghost btn-sm btn-block"
             onClick={() => {
-              store.advance(d.id)
-              toast(t('Picked up from {donor}.', { donor: d.donor }), 'info')
+              store.advance(d.id).then((r) => r.ok && toast(t('Picked up from {donor}.', { donor: d.donor }), 'info'))
             }}
           >
             <Route size={14} /> {t('Mark picked up')}
@@ -85,8 +83,7 @@ export function Dispatch({
           <button
             className="btn btn-primary btn-sm btn-block"
             onClick={() => {
-              store.advance(d.id)
-              toast(t('Delivered! {n} servings added to lifetime rescues.', { n: d.servings }))
+              store.advance(d.id).then((r) => r.ok && toast(t('Delivered! {n} servings added to lifetime rescues.', { n: d.servings })))
             }}
           >
             <PackageCheck size={14} /> {t('Mark delivered')}

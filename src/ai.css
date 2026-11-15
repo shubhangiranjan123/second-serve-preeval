@@ -373,3 +373,5 @@ ul.scan-problem { margin: 0; padding: 12px 16px 12px 32px; display: flex; flex-d
 .ops-bad svg:first-child { color: var(--pink); }
 .ops-warn svg:first-child { color: var(--amber); }
 .ops-info svg:first-child { color: var(--lilac); }
+
+.scan-code { font-family: var(--mono); font-size: 11.5px; color: var(--paper-muted); }

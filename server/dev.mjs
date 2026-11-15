@@ -1,11 +1,14 @@
-// Runs the AI backend and the Vite dev server together (works on Windows too).
-import { spawn } from 'node:child_process'
+// Development: build the shared rules, then run the backend and Vite together
+// (works on Windows too). Vite listens on the Wi-Fi as well, so phones can open
+// the app at http://<this-computer's-IP>:5173.
+import { spawn, spawnSync } from 'node:child_process'
+
+const built = spawnSync('npx vite build -c vite.server.config.ts --logLevel warn', { stdio: 'inherit', shell: true })
+if (built.status) process.exit(built.status)
 
 const procs = [
-  spawn(process.execPath, ['server/index.mjs'], { stdio: 'inherit' }),
-  // One command string + shell: works with npx on Windows without the
-  // "args with shell" deprecation warning.
-  spawn('npx vite', { stdio: 'inherit', shell: true }),
+  spawn(process.execPath, ['--disable-warning=ExperimentalWarning', 'server/index.mjs'], { stdio: 'inherit' }),
+  spawn('npx vite --host', { stdio: 'inherit', shell: true }),
 ]
 const stop = () => procs.forEach((p) => p.kill())
 process.on('SIGINT', stop)

@@ -1,61 +1,39 @@
-import { useCallback, useEffect, useState } from 'react'
-import type { AppState, Category, Diet, Donation, MatchWeights, Packaging, Screening, StorageType, TrustApplication, TrustCheckRecord } from '../types'
-import { createInitialApplications, nextStatus, syncNgo, type ReviewAction } from './trust'
-import { createInitialState, findArea } from '../data/demoData'
-import { MIN, estimateWeightKg } from './engine'
+// The app's data connection.
+//
+// SERVER mode (normal): data lives in the SECOND-SERVE backend (SQLite).
+//   Every change is sent to POST /api/action and checked there; every open
+//   screen receives the new state over /api/stream within about a second.
+// LOCAL mode (fallback): if no backend answers (e.g. the static site was
+//   opened on its own), the same rules run in this browser and data stays in
+//   localStorage, exactly like the original demo.
+
+import { useCallback, useEffect, useRef, useState } from 'react'
+import type { AppState, MatchWeights, TrustApplication, TrustCheckRecord } from '../types'
+import { ActionError, applyAction, freshState, isState, withTrust, type Action, type ActionResult, type Actor, type NewDonationInput, type Role, type ScreenedExtras } from './actions'
+import type { ReviewAction } from './trust'
+
+export type { NewDonationInput, ScreenedExtras } from './actions'
+export { withTrust } from './actions'
 
 export const STORAGE_KEY = 'second-serve-preeval-v2'
+const LOCAL_ACTOR_KEY = 'second-serve-local-actor'
 
-export type NewDonationInput = {
+export type User = {
+  id: number
+  role: Role
   name: string
-  donor: string
-  category: Category
-  servings: number
-  quantity: number
-  unit: string
-  area: string
-  address: string
-  storage: StorageType
-  diet: Diet
-  description: string
-  prepMinutes: number
-  travelEstimate: number
-  safeHours: number
+  donorName?: string | null
+  ngoId?: number | null
+  runnerId?: number | null
+  applicationId?: number | null
+  demo?: boolean
 }
+export type Account = { id: number; role: Role; name: string }
+export type Mode = 'loading' | 'server' | 'local'
+export type Conn = 'live' | 'reconnecting' | 'offline'
+export type Outcome = { ok: true; result: ActionResult } | { ok: false; error: { code: string; message: string } }
 
-// Extra fields from the AI Food Scan flow (Engine 1). All optional, so the
-// existing manual listing form keeps working exactly as before.
-export type ScreenedExtras = {
-  preparedAt?: number
-  packaging?: Packaging
-  screening?: Screening
-}
-
-function isState(value: unknown): value is AppState {
-  if (!value || typeof value !== 'object') return false
-  const s = value as Partial<AppState>
-  return (
-    s.version === 1 &&
-    Array.isArray(s.donations) &&
-    Array.isArray(s.ngos) &&
-    Array.isArray(s.runners) &&
-    Array.isArray(s.history)
-  )
-}
-
-// Older saves have no TrustCheck data: add the demo applications and make
-// each NGO's verification match its application, without touching anything else.
-export function withTrust(s: AppState, now = Date.now()): AppState {
-  if (Array.isArray(s.applications)) return s
-  const applications = createInitialApplications(now, s.ngos)
-  const ngos = s.ngos.map((n) => {
-    const app = applications.find((a) => a.role === 'recipient' && a.ngoId === n.id)
-    return app ? { ...n, verification: app.status } : n
-  })
-  return { ...s, ngos, applications }
-}
-
-function load(): AppState {
+function loadLocal(): AppState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
@@ -65,360 +43,287 @@ function load(): AppState {
   } catch {
     /* fall through to fresh demo data */
   }
-  return withTrust(createInitialState(Date.now()))
+  return freshState(Date.now())
+}
+
+function loadLocalUser(): User | null {
+  try {
+    const u: unknown = JSON.parse(sessionStorage.getItem(LOCAL_ACTOR_KEY) ?? 'null')
+    if (u && typeof u === 'object' && 'role' in u) return u as User
+  } catch {
+    /* ignore */
+  }
+  return null
+}
+
+const toActor = (u: User): Actor => ({
+  role: u.role,
+  name: u.name,
+  userId: u.id,
+  donorName: u.donorName ?? undefined,
+  ngoId: u.ngoId ?? null,
+  runnerId: u.runnerId ?? undefined,
+  applicationId: u.applicationId ?? null,
+})
+
+async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, { credentials: 'same-origin', ...init, headers: { 'content-type': 'application/json', ...(init?.headers ?? {}) } })
+  const body = await res.json().catch(() => null)
+  if (!body) throw new Error(`HTTP ${res.status}`)
+  return body as T
 }
 
 export function useRescueStore() {
-  const [state, setState] = useState<AppState>(load)
+  const [mode, setMode] = useState<Mode>('loading')
+  const [state, setState] = useState<AppState | null>(null)
+  const [user, setUser] = useState<User | null>(null)
+  const [conn, setConn] = useState<Conn>('offline')
+  const [demoPins, setDemoPins] = useState<Record<string, string> | null>(null)
+  const onError = useRef<(msg: string) => void>(() => {})
+  const stateRef = useRef<AppState | null>(null)
+  stateRef.current = state
+  const userRef = useRef<User | null>(null)
+  userRef.current = user
 
-  // Keep every open tab in sync (e.g. the projector's Room wall + the laptop).
+  // ---------------- decide the mode once
   useEffect(() => {
+    let cancelled = false
+    api<{ ok: boolean; mode?: string; user: User | null; demo?: boolean }>('/api/session')
+      .then((s) => {
+        if (cancelled) return
+        if (s.ok && s.mode === 'server') {
+          setMode('server')
+          setUser(s.user)
+        } else throw new Error('no backend')
+      })
+      .catch(() => {
+        if (cancelled) return
+        setMode('local')
+        setState(loadLocal())
+        setUser(loadLocalUser())
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // ---------------- server: live stream while signed in
+  useEffect(() => {
+    if (mode !== 'server' || !user) return
+    const es = new EventSource('/api/stream')
+    es.addEventListener('state', (e) => {
+      try {
+        const msg = JSON.parse((e as MessageEvent).data) as { state: AppState; user: User }
+        setState(msg.state)
+        setUser((prev) => (prev && JSON.stringify(prev) === JSON.stringify(msg.user) ? prev : msg.user))
+        setConn('live')
+      } catch {
+        /* ignore a malformed message */
+      }
+    })
+    es.onerror = () => {
+      setConn('reconnecting')
+      // A 401 (session expired) closes the stream for good: go back to sign-in.
+      fetch('/api/session')
+        .then((r) => r.json())
+        .then((s) => {
+          if (s && s.mode === 'server' && !s.user) {
+            es.close()
+            setUser(null)
+            setState(null)
+          }
+        })
+        .catch(() => {})
+    }
+    return () => es.close()
+  }, [mode, user?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---------------- local: persist + sync tabs
+  useEffect(() => {
+    if (mode !== 'local') return
     const onStorage = (e: StorageEvent) => {
       if (e.key !== STORAGE_KEY || !e.newValue) return
       try {
         const parsed: unknown = JSON.parse(e.newValue)
         if (isState(parsed)) setState(parsed)
       } catch {
-        /* ignore malformed writes */
+        /* ignore */
       }
     }
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
-  }, [])
-
+  }, [mode])
   useEffect(() => {
+    if (mode !== 'local' || !state) return
     try {
-      if (localStorage.getItem(STORAGE_KEY) === JSON.stringify(state)) return
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+      const json = JSON.stringify(state)
+      if (localStorage.getItem(STORAGE_KEY) !== json) localStorage.setItem(STORAGE_KEY, json)
     } catch {
-      /* storage full or blocked: the demo keeps working in memory */
+      /* storage full or blocked */
     }
-  }, [state])
+  }, [mode, state])
 
-  const addDonation = useCallback(
-    (input: NewDonationInput, extras: ScreenedExtras = {}): Donation | null => {
-      const now = Date.now()
-      // Duplicate guard: the same food from the same donor listed again within
-      // 10 minutes (double click, resubmitted form) is ignored.
-      const dup = state.donations.find(
-        (d) =>
-          d.status !== 'Delivered' &&
-          d.donor.trim().toLowerCase() === input.donor.trim().toLowerCase() &&
-          d.name.trim().toLowerCase() === input.name.trim().toLowerCase() &&
-          now - d.createdAt < 10 * MIN,
-      )
-      if (dup) return null
-      const held = extras.screening?.outcome === 'review'
-      const area = findArea(input.area)
-      const { safeHours, ...fields } = input
-      const created: Donation = {
-        id: Math.max(0, ...state.donations.map((d) => d.id)) + 1,
-        ...fields,
-        lat: area.lat,
-        lng: area.lng,
-        createdAt: now,
-        readyAt: now + input.prepMinutes * MIN,
-        safeUntil: now + Math.round(safeHours * 60) * MIN,
-        status: held ? 'In review' : 'Available',
-        ngoId: null,
-        runnerId: null,
-        stage: 'Pending',
-        timeline: [
-          {
-            key: 'created',
-            at: now,
-            note: extras.screening
-              ? `Listed by ${input.donor} · AI-screened${held ? ', held for review' : ''}`
-              : `Listed by ${input.donor}`,
-          },
-        ],
-        ...extras,
-      }
-      setState((s) => ({ ...s, donations: [created, ...s.donations] }))
-      return created
-    },
-    [state.donations],
-  )
-
-  const reserve = useCallback((donationId: number, ngoId: number, score: number) => {
-    setState((s) => {
-      const ngo = s.ngos.find((n) => n.id === ngoId)
-      return {
-        ...s,
-        donations: s.donations.map((d) =>
-          d.id === donationId && d.status === 'Available'
-            ? {
-                ...d,
-                status: 'Reserved',
-                ngoId,
-                stage: 'Pending',
-                timeline: [
-                  ...d.timeline,
-                  { key: 'matched', at: Date.now(), note: `Matched to ${ngo?.name ?? 'organisation'} · score ${score}` },
-                ],
-              }
-            : d,
-        ),
-      }
-    })
-  }, [])
-
-  // Manual review (Engine 1 → human). Only a coordinator's approval moves an
-  // 'In review' listing onto the board where matching can see it.
-  const approveReview = useCallback((donationId: number, note?: string) => {
-    setState((s) => ({
-      ...s,
-      donations: s.donations.map((d) =>
-        d.id === donationId && d.status === 'In review'
-          ? {
-              ...d,
-              status: 'Available',
-              screening: d.screening
-                ? { ...d.screening, review: { decision: 'approved', at: Date.now(), by: 'Coordinator', note } }
-                : d.screening,
-            }
-          : d,
-      ),
-    }))
-  }, [])
-
-  const releaseMatch = useCallback((donationId: number) => {
-    setState((s) => ({
-      ...s,
-      donations: s.donations.map((d) =>
-        d.id === donationId && d.status === 'Reserved' && d.stage === 'Pending'
-          ? { ...d, status: 'Available', ngoId: null, timeline: d.timeline.filter((t) => t.key === 'created') }
-          : d,
-      ),
-    }))
-  }, [])
-
-  const assignRunner = useCallback((donationId: number, runnerId: number) => {
-    setState((s) => {
-      const runner = s.runners.find((r) => r.id === runnerId)
-      // Never double-book: a runner on another live run, or off shift, can't be assigned.
-      const busy = s.donations.some((d) => d.id !== donationId && d.runnerId === runnerId && d.status === 'Reserved' && d.stage !== 'Delivered')
-      if (!runner || !runner.onShift || busy) return s
-      return {
-        ...s,
-        donations: s.donations.map((d) =>
-          d.id === donationId && d.status === 'Reserved' && d.stage === 'Pending'
-            ? {
-                ...d,
-                runnerId,
-                stage: 'Assigned',
-                timeline: [
-                  ...d.timeline,
-                  { key: 'assigned', at: Date.now(), note: `${runner?.name ?? 'Runner'} accepted the run` },
-                ],
-              }
-            : d,
-        ),
-      }
-    })
-  }, [])
-
-  // Assigned → Picked Up → Delivered. Delivered writes the permanent record.
-  const advance = useCallback((donationId: number) => {
-    setState((s) => {
-      const d = s.donations.find((x) => x.id === donationId)
-      if (!d || d.status !== 'Reserved') return s
-      const now = Date.now()
-      const ngo = s.ngos.find((n) => n.id === d.ngoId)
-      const runner = s.runners.find((r) => r.id === d.runnerId)
-
-      if (d.stage === 'Assigned') {
-        return {
-          ...s,
-          donations: s.donations.map((x) =>
-            x.id === donationId
-              ? {
-                  ...x,
-                  stage: 'Picked Up',
-                  timeline: [...x.timeline, { key: 'picked', at: now, note: `Collected from ${x.donor}` }],
-                }
-              : x,
-          ),
+  // ---------------- the one way to change data
+  const dispatch = useCallback(
+    async (action: Action): Promise<Outcome> => {
+      if (mode === 'server') {
+        try {
+          const r = await api<{ ok: boolean; result?: ActionResult; error?: { code: string; message: string } }>('/api/action', { method: 'POST', body: JSON.stringify({ action }) })
+          if (r.ok) return { ok: true, result: r.result ?? {} }
+          if (r.error?.code === 'SIGN_IN') setUser(null)
+          onError.current(r.error?.message ?? 'Something went wrong.')
+          return { ok: false, error: r.error ?? { code: 'ERROR', message: 'Something went wrong.' } }
+        } catch {
+          const error = { code: 'NETWORK', message: 'Couldn’t reach the SECOND-SERVE server. Is it still running?' }
+          onError.current(error.message)
+          return { ok: false, error }
         }
       }
-
-      if (d.stage === 'Picked Up') {
-        const already = s.history.some((r) => r.donationId === donationId)
-        return {
-          ...s,
-          donations: s.donations.map((x) =>
-            x.id === donationId
-              ? {
-                  ...x,
-                  stage: 'Delivered',
-                  status: 'Delivered',
-                  timeline: [
-                    ...x.timeline,
-                    { key: 'delivered', at: now, note: `Handed over at ${ngo?.name ?? 'organisation'}` },
-                  ],
-                }
-              : x,
-          ),
-          runners: already
-            ? s.runners
-            : s.runners.map((r) => (r.id === d.runnerId ? { ...r, completed: r.completed + 1 } : r)),
-          history: already
-            ? s.history
-            : [
-                ...s.history,
-                {
-                  donationId,
-                  food: d.name,
-                  donor: d.donor,
-                  category: d.category,
-                  ngoId: d.ngoId,
-                  ngoName: ngo?.name ?? 'Organisation',
-                  runnerName: runner?.name ?? 'Runner',
-                  servings: d.servings,
-                  weightKg: estimateWeightKg(d),
-                  deliveredAt: now,
-                },
-              ],
-        }
+      const s = stateRef.current
+      const u = userRef.current
+      if (!s || !u) return { ok: false, error: { code: 'SIGN_IN', message: 'Choose who you are first.' } }
+      try {
+        const out = applyAction(s, action, toActor(u), Date.now())
+        setState(out.state)
+        return { ok: true, result: out.result }
+      } catch (e) {
+        const error = e instanceof ActionError ? { code: e.code, message: e.message } : { code: 'ERROR', message: String(e) }
+        onError.current(error.message)
+        return { ok: false, error }
       }
-      return s
-    })
-  }, [])
-
-  const withdraw = useCallback((donationId: number) => {
-    setState((s) => ({
-      ...s,
-      donations: s.donations.filter((d) => !(d.id === donationId && (d.status === 'Available' || d.status === 'In review'))),
-    }))
-  }, [])
-
-  const setWeights = useCallback((weights: MatchWeights | null) => {
-    setState((s) => {
-      const next = { ...s }
-      if (weights) next.weights = weights
-      else delete next.weights
-      return next
-    })
-  }, [])
-
-  // Quantity-aware allocation: carve `servings` off an available listing into
-  // a new listing (same food, same deadline) so it can go to an NGO that only
-  // has room for part of it. The original keeps the rest.
-  const splitDonation = useCallback(
-    (donationId: number, servings: number): Donation | null => {
-      const d = state.donations.find((x) => x.id === donationId)
-      if (!d || d.status !== 'Available' || servings < 1 || servings >= d.servings) return null
-      const ratio = servings / d.servings
-      const now = Date.now()
-      const child: Donation = {
-        ...d,
-        id: Math.max(0, ...state.donations.map((x) => x.id)) + 1,
-        servings,
-        quantity: d.unit === 'servings' ? servings : Math.max(0.1, Math.round(d.quantity * ratio * 10) / 10),
-        ngoId: null,
-        runnerId: null,
-        stage: 'Pending',
-        status: 'Available',
-        timeline: [...d.timeline.filter((t) => t.key === 'created'), { key: 'created', at: now, note: `Split ${servings} of ${d.servings} servings from listing #${String(d.id).padStart(3, '0')}` }],
-      }
-      setState((s) => ({
-        ...s,
-        donations: [
-          child,
-          ...s.donations.map((x) =>
-            x.id === donationId
-              ? {
-                  ...x,
-                  servings: x.servings - servings,
-                  quantity: x.unit === 'servings' ? x.servings - servings : Math.max(0.1, Math.round(x.quantity * (1 - ratio) * 10) / 10),
-                }
-              : x,
-          ),
-        ],
-      }))
-      return child
     },
-    [state.donations],
+    [mode],
   )
 
-  const toggleShift = useCallback((runnerId: number) => {
-    setState((s) => ({
-      ...s,
-      runners: s.runners.map((r) => (r.id === runnerId ? { ...r, onShift: !r.onShift } : r)),
-    }))
-  }, [])
+  // ---------------- accounts
+  const accounts = useCallback(async (): Promise<Account[]> => {
+    if (mode === 'server') {
+      const r = await api<{ accounts: Account[]; demoPins: Record<string, string> | null }>('/api/auth/accounts')
+      setDemoPins(r.demoPins)
+      return r.accounts
+    }
+    const s = stateRef.current ?? loadLocal()
+    const donors = [...new Set([...s.donations.map((d) => d.donor), ...(s.applications ?? []).filter((a) => a.role === 'donor').map((a) => a.orgName)])]
+    let id = 1
+    return [
+      { id: id++, role: 'coordinator', name: 'Coordinator' },
+      ...donors.map((name) => ({ id: id++, role: 'donor' as const, name })),
+      ...s.ngos.map((n) => ({ id: 1000 + n.id, role: 'ngo' as const, name: n.name })),
+      ...s.runners.map((r) => ({ id: 2000 + r.id, role: 'runner' as const, name: r.name })),
+    ]
+  }, [mode])
 
-  const reset = useCallback(() => {
-    setState(withTrust(createInitialState(Date.now())))
-  }, [])
-
-  // ---------------- TrustCheck ----------------
-  const submitApplication = useCallback(
-    (draft: TrustApplication, asDraft = false): TrustApplication => {
-      const now = Date.now()
-      const apps = state.applications ?? []
-      const isNew = !apps.some((a) => a.id === draft.id)
-      const saved: TrustApplication = {
-        ...draft,
-        id: isNew ? Math.max(0, ...apps.map((a) => a.id)) + 1 : draft.id,
-        status: asDraft ? 'Not Submitted' : 'Submitted',
-        demo: false,
-        submittedAt: asDraft ? null : now,
-        history: asDraft
-          ? draft.history
-          : [...draft.history, { at: now, by: 'Applicant', action: draft.status === 'Resubmission Required' ? 'Resubmitted' : 'Submitted' }],
+  const login = useCallback(
+    async (account: Account, pin: string): Promise<string | null> => {
+      if (mode === 'server') {
+        const r = await api<{ ok: boolean; user?: User; error?: { message: string } }>('/api/auth/login', { method: 'POST', body: JSON.stringify({ userId: account.id, pin }) })
+        if (!r.ok || !r.user) return r.error?.message ?? 'Sign-in failed.'
+        setState(null)
+        setUser(r.user)
+        return null
       }
-      setState((s) => {
-        const list = s.applications ?? []
-        const next = list.some((a) => a.id === saved.id) ? list.map((a) => (a.id === saved.id ? saved : a)) : [saved, ...list]
-        const { ngos, ngoId } = syncNgo(s, saved)
-        return { ...s, ngos, applications: next.map((a) => (a.id === saved.id ? { ...saved, ngoId } : a)) }
+      // Offline demo: no PINs, the identity is just chosen.
+      const s = stateRef.current ?? loadLocal()
+      const app = (s.applications ?? []).find((a) => a.orgName === account.name)
+      const u: User = {
+        id: account.id,
+        role: account.role,
+        name: account.name,
+        donorName: account.role === 'donor' ? account.name : null,
+        ngoId: account.role === 'ngo' ? account.id - 1000 : null,
+        runnerId: account.role === 'runner' ? account.id - 2000 : null,
+        applicationId: app?.id ?? null,
+      }
+      sessionStorage.setItem(LOCAL_ACTOR_KEY, JSON.stringify(u))
+      setUser(u)
+      return null
+    },
+    [mode],
+  )
+
+  const signup = useCallback(
+    async (role: 'donor' | 'ngo', name: string, pin: string): Promise<string | null> => {
+      if (mode !== 'server') return 'Creating accounts needs the SECOND-SERVE server.'
+      const r = await api<{ ok: boolean; user?: User; error?: { message: string } }>('/api/auth/signup', { method: 'POST', body: JSON.stringify({ role, name, pin }) })
+      if (!r.ok || !r.user) return r.error?.message ?? 'Couldn’t create the account.'
+      setUser(r.user)
+      return null
+    },
+    [mode],
+  )
+
+  const logout = useCallback(async () => {
+    if (mode === 'server') await api('/api/auth/logout', { method: 'POST' }).catch(() => null)
+    else sessionStorage.removeItem(LOCAL_ACTOR_KEY)
+    setUser(null)
+    if (mode === 'server') setState(null)
+  }, [mode])
+
+  /** Upload a TrustCheck document to the server (server mode only). */
+  const uploadDoc = useCallback(
+    async (file: File, kind: string): Promise<string | null> => {
+      if (mode !== 'server') return null
+      const data = await new Promise<string>((resolve, reject) => {
+        const r = new FileReader()
+        r.onload = () => resolve(String(r.result).split(',')[1] ?? '')
+        r.onerror = () => reject(new Error('read failed'))
+        r.readAsDataURL(file)
       })
-      return saved
+      const res = await api<{ ok: boolean; url?: string; error?: { message: string } }>('/api/docs', { method: 'POST', body: JSON.stringify({ kind, name: file.name, type: file.type, data }) })
+      if (!res.ok) throw new Error(res.error?.message ?? 'Upload failed')
+      return res.url ?? null
     },
-    [state.applications],
+    [mode],
   )
 
-  const reviewApplication = useCallback((id: number, action: ReviewAction, note?: string) => {
-    setState((s) => {
-      const app = (s.applications ?? []).find((a) => a.id === id)
-      if (!app) return s
-      const status = nextStatus(action)
-      const updated: TrustApplication = {
-        ...app,
-        status,
-        decisionNote: action === 'reject' || action === 'resubmit' ? note : app.decisionNote,
-        history: [...app.history, { at: Date.now(), by: 'Coordinator', action: status, note }],
-      }
-      const { ngos, ngoId } = syncNgo(s, updated)
-      const final = { ...updated, ngoId }
-      return { ...s, ngos, applications: (s.applications ?? []).map((a) => (a.id === id ? final : a)) }
-    })
+  const importLocal = useCallback(async (): Promise<string> => {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    const parsed: unknown = raw ? JSON.parse(raw) : null
+    if (!isState(parsed)) return 'This browser has no saved SECOND-SERVE data to import.'
+    const r = await api<{ ok: boolean; error?: { message: string } }>('/api/admin/import', { method: 'POST', body: JSON.stringify({ state: parsed }) })
+    return r.ok ? `Imported ${parsed.donations.length} listings from this browser.` : r.error?.message ?? 'Import failed.'
   }, [])
 
-  const addTrustCheck = useCallback((id: number, check: Omit<TrustCheckRecord, 'id' | 'at' | 'by'>) => {
-    setState((s) => ({
-      ...s,
-      applications: (s.applications ?? []).map((a) =>
-        a.id === id
-          ? {
-              ...a,
-              checks: [...a.checks, { ...check, id: Math.max(0, ...a.checks.map((c) => c.id)) + 1, at: Date.now(), by: 'Coordinator' }],
-              history: [...a.history, { at: Date.now(), by: 'Coordinator', action: `Checked ${check.portal}`, note: `${check.result}${check.reference ? ` · ${check.reference}` : ''}` }],
-            }
-          : a,
-      ),
-    }))
+  const setErrorHandler = useCallback((fn: (msg: string) => void) => {
+    onError.current = fn
   }, [])
 
-  const toggleTrustItem = useCallback((id: number, key: string) => {
-    setState((s) => ({
-      ...s,
-      applications: (s.applications ?? []).map((a) => (a.id === id ? { ...a, checklist: { ...a.checklist, [key]: !a.checklist[key] } } : a)),
-    }))
-  }, [])
-
-  return { state, addDonation, approveReview, setWeights, splitDonation, submitApplication, reviewApplication, addTrustCheck, toggleTrustItem, reserve, releaseMatch, assignRunner, advance, withdraw, toggleShift, reset }
+  // ---------------- named actions (thin wrappers over dispatch)
+  const a = dispatch
+  return {
+    mode,
+    state,
+    user,
+    conn: mode === 'local' ? ('offline' as Conn) : conn,
+    demoPins,
+    dispatch,
+    accounts,
+    login,
+    signup,
+    logout,
+    uploadDoc,
+    importLocal,
+    setErrorHandler,
+    addDonation: (input: NewDonationInput, extras: ScreenedExtras = {}, autoMatch = true) => a({ type: 'addDonation', input, extras, autoMatch }),
+    approveReview: (donationId: number, note?: string, autoMatch = true) => a({ type: 'approveReview', donationId, note, autoMatch }),
+    reserve: (donationId: number, ngoId: number, score: number) => a({ type: 'reserve', donationId, ngoId, score }),
+    autoMatch: (donationId: number) => a({ type: 'autoMatch', donationId }),
+    releaseMatch: (donationId: number) => a({ type: 'releaseMatch', donationId }),
+    assignRunner: (donationId: number, runnerId: number) => a({ type: 'assignRunner', donationId, runnerId }),
+    advance: (donationId: number) => a({ type: 'advance', donationId }),
+    withdraw: (donationId: number) => a({ type: 'withdraw', donationId }),
+    splitDonation: (donationId: number, servings: number, autoMatch = true) => a({ type: 'splitDonation', donationId, servings, autoMatch }),
+    ngoDecline: (donationId: number, reason: string) => a({ type: 'ngoDecline', donationId, reason }),
+    ngoConfirmReceipt: (donationId: number) => a({ type: 'ngoConfirmReceipt', donationId }),
+    setAccepting: (ngoId: number, accepting: boolean) => a({ type: 'setAccepting', ngoId, accepting }),
+    toggleShift: (runnerId: number) => a({ type: 'toggleShift', runnerId }),
+    setWeights: (weights: MatchWeights | null) => a({ type: 'setWeights', weights }),
+    submitApplication: (draft: TrustApplication, asDraft = false) => a({ type: 'submitApplication', draft, asDraft }),
+    reviewApplication: (id: number, action: ReviewAction, note?: string) => a({ type: 'reviewApplication', id, action, note }),
+    addTrustCheck: (id: number, check: Omit<TrustCheckRecord, 'id' | 'at' | 'by'>) => a({ type: 'addTrustCheck', id, check }),
+    toggleTrustItem: (id: number, key: string) => a({ type: 'toggleTrustItem', id, key }),
+    reset: () => a({ type: 'reset' }),
+  }
 }
 
 export type RescueStore = ReturnType<typeof useRescueStore>

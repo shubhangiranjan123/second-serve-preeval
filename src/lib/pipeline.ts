@@ -363,7 +363,9 @@ export function runMatchingPipeline(
     return { ...base, checked: 0, eligible: [], excluded: [], status: 'not-ready', headline: 'Safe window has closed', explanation: ['The food is past its safe-use time and must not be redistributed.'] }
 
   // Stage 1 (existing engine, unchanged), then Stage 2 ordering with the weights in use.
-  const m = matchNgos(donation, state.ngos, state.donations, state.history, now)
+  // NGOs that already declined this rescue are never offered it again.
+  const declined = new Set(donation.declinedBy ?? [])
+  const m = matchNgos(donation, state.ngos.filter((n) => !declined.has(n.id)), state.donations, state.history, now)
   const eligible = [...m.eligible].sort((a, b) => weightedScore(b, weights) - weightedScore(a, weights) || a.travelMin - b.travelMin)
   const checked = eligible.length + m.excluded.length
 
@@ -440,6 +442,8 @@ export function runMatchingPipeline(
         `Weight sensitivity: stays #1 in ${stability.agree} of ${stability.trials} trials with any weight ±25 % (${stability.label.toLowerCase()}, lead ${stability.margin} pts).`,
       )
     if (customWeights) explanation.push('Custom weights are in use (see the Weights tab).')
+    if (declined.size)
+      explanation.push(`${state.ngos.filter((n) => declined.has(n.id)).map((n) => n.name).join(', ')} declined this rescue earlier, so ${declined.size === 1 ? 'it was' : 'they were'} left out.`)
   }
 
   return {

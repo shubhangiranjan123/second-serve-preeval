@@ -176,17 +176,23 @@ export async function geminiWithFallback(image, cfg, fetchImpl = fetch, sleep = 
     .filter((m) => m && m !== primary)
   const plan = [primary, primary, ...fallbacks].slice(0, 5)
   const started = Date.now()
-  const budget = cfg.totalBudgetMs ?? 80_000
+  const budget = cfg.totalBudgetMs ?? 85_000
   let last
   for (let i = 0; i < plan.length; i++) {
     const left = budget - (Date.now() - started)
     if (left < 5_000) break
     const model = plan[i]
     const retrySame = i === 1
-    if (retrySame && !(last && (last.code === 'PROVIDER_BUSY' || last.code === 'PROVIDER_RATE_LIMIT'))) continue
-    if (retrySame) await sleep(1500)
+    // Retry the same model once for temporary problems (busy, rate limit, a
+    // slow answer, or a garbled reply), then move on to the backups.
+    const temporary = new Set(['PROVIDER_BUSY', 'PROVIDER_RATE_LIMIT', 'TIMEOUT', 'INVALID_RESPONSE', 'PROVIDER_UNREACHABLE'])
+    if (retrySame && !(last && temporary.has(last.code))) continue
+    if (retrySame) await sleep(last?.code === 'PROVIDER_RATE_LIMIT' ? 3000 : 1500)
     try {
-      return await geminiScan(image, { ...cfg, GEMINI_MODEL: model, timeoutMs: Math.min(cfg.timeoutMs, left) }, fetchImpl)
+      const t0 = Date.now()
+      const out = await geminiScan(image, { ...cfg, GEMINI_MODEL: model, timeoutMs: Math.min(cfg.timeoutMs, left) }, fetchImpl)
+      console.log(`[food-scan] ok · ${model} · ${((Date.now() - t0) / 1000).toFixed(1)} s${i > 0 ? ` (attempt ${i + 1})` : ''}`)
+      return out
     } catch (err) {
       last = err
       if (!(err instanceof ScanError) || !SWITCH_ON.has(err.code)) throw err

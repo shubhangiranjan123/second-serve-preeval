@@ -94,6 +94,8 @@ export type Donation = {
   preparedAt?: number // when the food was cooked / prepared
   packaging?: Packaging
   screening?: Screening
+  declinedBy?: number[] // NGOs that declined this rescue; never re-matched to them
+  receivedBy?: { at: number; by: string } // NGO confirmed the handover
 }
 
 // 'Pending' is kept for older saved data; TrustCheck statuses are used from now on.
@@ -175,7 +177,8 @@ export type TrustDoc = {
   name: string
   size: number
   type: string
-  preview?: string // small image preview (data URL). PDFs and large files are recorded by name only.
+  preview?: string // small image preview (data URL)
+  url?: string // server copy of the original file (server mode): /api/docs/<id>
 }
 
 export type TrustCheckRecord = {

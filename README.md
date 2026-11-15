@@ -4,7 +4,7 @@
 
 SECOND-SERVE is a food-rescue coordination platform. It connects restaurants and food donors with verified NGOs, shelters and volunteer runners, and treats every donation as a **rescue that has to make it in time**, not as a listing on a noticeboard.
 
-This folder is a separate, smaller pre-evaluation version of the full SECOND-SERVE project. It shares the full project's stack (React + TypeScript + Vite + localStorage), its matching engine, its terminology (Rescue board, NGO network, Runner dispatch, lifetime rescues) and its demo city. It doesn't touch the original repository.
+This folder is a separate, smaller pre-evaluation version of the full SECOND-SERVE project. It shares the full project's stack (React + TypeScript + Vite), now with its own Node + SQLite backend, its matching engine, its terminology (Rescue board, NGO network, Runner dispatch, lifetime rescues) and its demo city. It doesn't touch the original repository.
 
 > **All organisations, runners, donors and rescues are fictional demonstration data.** No real NGO partnerships, live GPS, verified deliveries or measured emissions are claimed.
 
@@ -12,7 +12,7 @@ This folder is a separate, smaller pre-evaluation version of the full SECOND-SER
 
 ## 1. Run it (Windows)
 
-You need **Node.js 20.19+ or 22.12+** (check with `node -v`).
+You need **Node.js 22.13 or newer** (check with `node -v`). The backend uses Node's built-in SQLite, so there is no database to install.
 
 Open **PowerShell** or **Command Prompt** in the folder where you unzipped the project:
 
@@ -26,7 +26,7 @@ npm run dev
 
 **Easiest setup:** run `node fix-ai.mjs` once. It asks for your key if needed, picks a Gemini model your key can actually use (testing it with a real photo), sets up up to 4 sample photos in `public/samples`, and writes `.env`. Then `npm run dev`.
 
-`npm run dev` starts **two** things: the AI backend on port 8787 (holds the API key) and the app on **http://localhost:5173**. Vite forwards `/api` to the backend, so the key never reaches the browser.
+`npm run dev` starts **two** things: the backend on port 8787 (database, sign-in, live updates, and the AI key) and the app on **http://localhost:5173**. Vite forwards `/api` to the backend, so the key never reaches the browser.
 
 Without a key everything still works except the photo scan: the scanner says it isn't configured, and a donor can continue without AI (the listing then needs a coordinator's approval before matching).
 
@@ -37,13 +37,41 @@ npm run build
 npm run start        # app + API on http://localhost:8787
 ```
 
-Tests: `npm test` (44 tests: safety rules, matching pipeline, API server). Type-check only: `npm run typecheck`
+Tests: `npm test` (97 tests: safety rules, matching pipeline, AI server, role permissions, rescue flow, and the data API on a real SQLite file). Type-check only: `npm run typecheck`
 
 macOS and Linux use the same commands.
 
-**Reset:** use **Reset demo data** in the footer. It restores the sample city with fresh, live deadlines. Do this right before you present.
+**Reset:** sign in as the coordinator and use **Reset demo data** in the footer. It restores the sample city with fresh, live deadlines. Do this right before you present.
 
 ---
+
+## 1a. Backend, sign-in and the four boards
+
+Everyone signs in on the first screen by picking a role, their name, and a PIN.
+
+| Role | Board | Demo PIN |
+|---|---|---|
+| Coordinator | The full console: board, map, NGOs, TrustCheck, dispatch, impact, activity log | `2468` |
+| Donor | Scan & donate, live progress of each listing, impact, TrustCheck status | `1111` |
+| NGO | Food coming your way, *Confirm it arrived*, *Can't take it* (passes it to the next NGO automatically), accepting on/off | `2222` |
+| Runner (phone-first) | Shift on/off, *Take this run*, pickup and delivery legs with Google Maps directions, one big next-step button | `3333` |
+
+Donors and NGOs can also create their own account (*New donor? / New NGO? Create an account*), then apply through TrustCheck. A new NGO only receives food after the coordinator approves it.
+
+**How it works**
+
+- **One set of rules, enforced on the server.** Every change is an *action* (`src/lib/actions.ts`). The same code runs in the browser (offline mode) and on the server, which checks who you are before applying it. A runner can only take runs for themselves, an NGO can only decline or confirm its own rescues, a donor always lists as their own organisation. Before reserving an NGO the server re-checks all 7 matching gates.
+- **Database:** SQLite file at `data/second-serve.db` (tables per entity, photos and documents stored as blobs). It survives restarts. Change the path with `SS_DB_PATH`.
+- **Live updates:** every signed-in screen gets the new state the moment anything changes (Server-Sent Events). The green *Live* dot shows the connection.
+- **Security:** PINs hashed with scrypt; 5 wrong PINs lock the account for 5 minutes; sessions are random tokens stored hashed, in an HttpOnly cookie, for 12 hours; uploaded files are checked by content, not by name; every action (including refused ones) goes into the **Activity log** (coordinator → account menu).
+- **Phones on the same Wi-Fi:** account menu → *Open on a phone* shows a QR code with your computer's network address. Windows may ask to allow Node through the firewall; allow it on private networks.
+- **Offline mode:** if the app is opened without the backend (e.g. a static host), it falls back to this browser's storage and asks only for a role, no PIN. Coming back to the backend, the coordinator can *Import this browser's saved data*.
+
+**Settings** (in `.env` or the environment): `SS_COORDINATOR_PIN` (use your own instead of 2468), `SS_DEMO=0` (no demo accounts or demo PINs shown), `SS_DB_PATH`, `PORT`.
+
+> Demo PINs are for a hackathon demo. Before real use, set `SS_DEMO=0`, set your own coordinator PIN, and serve it over HTTPS.
+
+**Deploying online:** any host that runs a long-lived Node 22.13+ process with a persistent disk works (e.g. Render with a disk, Railway with a volume, a small VPS). Build command `npm install && npm run build`, start command `npm start`, set `GEMINI_API_KEY` and `SS_DB_PATH` (pointing at the persistent disk) in the host's environment. Serverless hosts without a disk will lose the database.
 
 ## 1b. Final build: what changed
 
